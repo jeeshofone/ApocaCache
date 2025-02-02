@@ -162,9 +162,16 @@ class ContentManager:
                         log.debug("directory.html.parsing")
                         soup = BeautifulSoup(html, 'html.parser')
                         
-                        # Find all links in the directory listing
-                        log.debug("directory.links.finding")
-                        links = soup.find_all('a')
+                        # Find the pre element containing the file list
+                        pre = soup.find('pre')
+                        if not pre:
+                            log.error("directory.html.no_pre_element",
+                                    url=url,
+                                    html_preview=html[:500])
+                            return []
+                        
+                        # Process each link in the pre element
+                        links = pre.find_all('a')
                         log.info("directory.links.found", count=len(links))
                         
                         if not links:
@@ -175,108 +182,117 @@ class ContentManager:
                         
                         # Process each link
                         for link in links:
-                            log.debug("directory.link.processing", 
-                                    link_html=str(link),
-                                    link_text=link.text)
-                            
-                            href = link.get('href')
-                            if not href or href == '../':
-                                log.debug("directory.link.skipped", 
-                                        reason="invalid_href",
-                                        href=href)
-                                continue
-                            
-                            # Get the text after the link which contains size and date
-                            text = link.next_sibling
-                            if not text:
-                                log.debug("directory.link.skipped",
-                                        reason="no_metadata",
-                                        href=href)
-                                continue
-                            
-                            text = text.strip()
-                            if not text:
-                                log.debug("directory.link.skipped",
-                                        reason="empty_metadata",
-                                        href=href)
-                                continue
-                            
-                            log.debug("directory.link.metadata",
-                                    href=href,
-                                    text=text)
-                            
-                            # Parse the text for size and date
-                            parts = text.split()
-                            if len(parts) < 3:
-                                log.debug("directory.link.skipped",
-                                        reason="insufficient_parts",
-                                        parts=parts)
-                                continue
-                            
                             try:
-                                # Try to parse date and size
-                                date_str = f"{parts[0]} {parts[1]}"
-                                size_str = parts[2]
+                                href = link.get('href')
+                                if not href or href.startswith('?') or href == '../':
+                                    log.debug("directory.link.skipped", 
+                                            reason="invalid_href",
+                                            href=href)
+                                    continue
                                 
-                                log.debug("directory.link.parsing",
-                                        date=date_str,
-                                        size=size_str)
+                                log.debug("directory.link.processing", 
+                                        link_html=str(link),
+                                        link_text=link.text,
+                                        href=href)
                                 
-                                # Convert size to bytes
-                                if size_str == '-':
-                                    size = 0
-                                else:
-                                    size = int(size_str)
+                                # Get the parent text node which contains size and date
+                                parent_text = link.parent.get_text()
+                                if not parent_text:
+                                    log.debug("directory.link.skipped",
+                                            reason="no_parent_text",
+                                            href=href)
+                                    continue
                                 
-                                filename = href.rstrip('/')
+                                # Extract the text after the link text
+                                metadata_text = parent_text.split(link.text)[-1].strip()
+                                if not metadata_text:
+                                    log.debug("directory.link.skipped",
+                                            reason="no_metadata",
+                                            href=href)
+                                    continue
                                 
-                                if filename.endswith('.zim'):
-                                    full_path = os.path.join(path, filename) if path else filename
-                                    log.debug("directory.file.checking",
-                                            filename=filename,
-                                            full_path=full_path)
+                                log.debug("directory.link.metadata",
+                                        href=href,
+                                        metadata=metadata_text)
+                                
+                                # Parse the text for size and date
+                                parts = metadata_text.split()
+                                if len(parts) < 3:
+                                    log.debug("directory.link.skipped",
+                                            reason="insufficient_parts",
+                                            parts=parts)
+                                    continue
+                                
+                                try:
+                                    # Try to parse date and size
+                                    date_str = f"{parts[0]} {parts[1]}"
+                                    size_str = parts[2]
                                     
-                                    # Check if file matches content pattern and language filter
-                                    matches_pattern = self._matches_content_pattern(filename)
-                                    matches_language = self._matches_language_filter(filename)
+                                    log.debug("directory.link.parsing",
+                                            date=date_str,
+                                            size=size_str)
                                     
-                                    log.debug("directory.file.matches",
-                                            filename=filename,
-                                            matches_pattern=matches_pattern,
-                                            matches_language=matches_language,
-                                            pattern=self.config.content_pattern,
-                                            languages=self.config.language_filter)
-                                    
-                                    if matches_pattern and matches_language:
-                                        content_list.append((full_path, date_str, size))
-                                        log.info("directory.file.added", 
-                                               filename=full_path,
-                                               size=size,
-                                               date=date_str)
+                                    # Convert size to bytes
+                                    if size_str == '-':
+                                        size = 0
                                     else:
-                                        log.debug("directory.file.filtered", 
-                                                filename=full_path,
+                                        size = int(size_str)
+                                    
+                                    filename = href.rstrip('/')
+                                    
+                                    if filename.endswith('.zim'):
+                                        full_path = os.path.join(path, filename) if path else filename
+                                        log.debug("directory.file.checking",
+                                                filename=filename,
+                                                full_path=full_path)
+                                        
+                                        # Check if file matches content pattern and language filter
+                                        matches_pattern = self._matches_content_pattern(filename)
+                                        matches_language = self._matches_language_filter(filename)
+                                        
+                                        log.debug("directory.file.matches",
+                                                filename=filename,
                                                 matches_pattern=matches_pattern,
-                                                matches_language=matches_language)
-                                elif href.endswith('/') and self.config.scan_subdirs:
-                                    # This is a directory, scan it recursively if scan_subdirs is enabled
-                                    subdir_name = filename
-                                    subdir_url = f"{url.rstrip('/')}/{subdir_name}"
-                                    subdir_path = os.path.join(path, subdir_name) if path else subdir_name
-                                    
-                                    log.info("directory.subdir.scanning",
-                                            subdir=subdir_path,
-                                            url=subdir_url)
-                                    
-                                    subdir_content = await scan_directory(subdir_url, subdir_path)
-                                    content_list.extend(subdir_content)
-                                    
-                                    log.info("directory.subdir.scanned", 
-                                           subdir=subdir_path,
-                                           files_found=len(subdir_content))
+                                                matches_language=matches_language,
+                                                pattern=self.config.content_pattern,
+                                                languages=self.config.language_filter)
+                                        
+                                        if matches_pattern and matches_language:
+                                            content_list.append((full_path, date_str, size))
+                                            log.info("directory.file.added", 
+                                                   filename=full_path,
+                                                   size=size,
+                                                   date=date_str)
+                                        else:
+                                            log.debug("directory.file.filtered", 
+                                                    filename=full_path,
+                                                    matches_pattern=matches_pattern,
+                                                    matches_language=matches_language)
+                                    elif href.endswith('/') and self.config.scan_subdirs:
+                                        # This is a directory, scan it recursively if scan_subdirs is enabled
+                                        subdir_name = filename
+                                        subdir_url = f"{url.rstrip('/')}/{subdir_name}"
+                                        subdir_path = os.path.join(path, subdir_name) if path else subdir_name
+                                        
+                                        log.info("directory.subdir.scanning",
+                                                subdir=subdir_path,
+                                                url=subdir_url)
+                                        
+                                        subdir_content = await scan_directory(subdir_url, subdir_path)
+                                        content_list.extend(subdir_content)
+                                        
+                                        log.info("directory.subdir.scanned", 
+                                               subdir=subdir_path,
+                                               files_found=len(subdir_content))
+                                except Exception as e:
+                                    log.error("directory.link.parse_failed", 
+                                            text=metadata_text,
+                                            error=str(e),
+                                            traceback=traceback.format_exc())
+                                    continue
                             except Exception as e:
-                                log.error("directory.link.parse_failed", 
-                                        text=text,
+                                log.error("directory.link.process_failed",
+                                        link=str(link),
                                         error=str(e),
                                         traceback=traceback.format_exc())
                                 continue
