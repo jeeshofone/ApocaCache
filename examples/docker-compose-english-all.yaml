@@ -16,10 +16,11 @@ services:
       - VERIFY_DOWNLOADS=true
       - LOG_LEVEL=INFO
     volumes:
-      - kiwix_data:/data
       - ./kiwix:/data:rw
     user: "${UID:-1000}:${GID:-1000}"
     restart: unless-stopped
+    networks:
+      - kiwix_network
     healthcheck:
       test: ["CMD", "python", "-c", "import os; os.access('/data/library.xml', os.R_OK) or exit(1)"]
       interval: 30s
@@ -32,7 +33,6 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - kiwix_data:/data:ro
       - ./kiwix:/data:ro
     user: "${UID:-1000}:${GID:-1000}"
     command: --library /data/library.xml
@@ -40,6 +40,8 @@ services:
       library-maintainer:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - kiwix_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/catalog"]
       interval: 30s
@@ -51,5 +53,5 @@ volumes:
     name: apocacache_kiwix_data_eng
 
 networks:
-  default:
+  kiwix_network:
     name: apocacache_network_eng 
