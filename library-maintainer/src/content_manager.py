@@ -52,6 +52,22 @@ class ContentManager:
         except Exception as e:
             log.error("content_state.save_failed", error=str(e))
     
+    def _matches_content_pattern(self, filename: str) -> bool:
+        """Check if filename matches content pattern."""
+        if not self.config.content_pattern:
+            return True
+        patterns = self.config.content_pattern.split('|')
+        return any(re.search(pattern, filename) for pattern in patterns)
+    
+    def _matches_language_filter(self, filename: str) -> bool:
+        """Check if filename matches language filter."""
+        if not self.config.language_filter:
+            return True
+        for lang in self.config.language_filter:
+            if f"_{lang}_" in filename or f"_{lang}." in filename:
+                return True
+        return False
+    
     async def _get_available_content(self) -> List[Tuple[str, str, int]]:
         """Fetch list of available content from Kiwix server."""
         async def scan_directory(url: str, path: str = "") -> List[Tuple[str, str, int]]:
@@ -86,7 +102,7 @@ class ContentManager:
                                     date_str = match.group(2)
                                     log.info("content_list.matched_production", filename=filename, size=size, date=date_str)
                                 else:
-                                    log.error("content_list.no_match", line=line)
+                                    log.info("content_list.no_match", line=line)
                                     continue
                             else:
                                 filename = match.group(1).strip()
@@ -96,10 +112,17 @@ class ContentManager:
                             
                             if filename.endswith('.zim'):
                                 full_path = os.path.join(path, filename) if path else filename
-                                content_list.append((full_path, date_str, size))
-                                log.info("content_list.added", filename=full_path)
-                            elif filename.endswith('/'):
-                                # This is a directory, scan it recursively
+                                # Check if file matches content pattern and language filter
+                                if self._matches_content_pattern(filename) and self._matches_language_filter(filename):
+                                    content_list.append((full_path, date_str, size))
+                                    log.info("content_list.added", filename=full_path)
+                                else:
+                                    log.debug("content_list.filtered", 
+                                            filename=full_path, 
+                                            matches_pattern=self._matches_content_pattern(filename),
+                                            matches_language=self._matches_language_filter(filename))
+                            elif filename.endswith('/') and self.config.scan_subdirs:
+                                # This is a directory, scan it recursively if scan_subdirs is enabled
                                 subdir_name = filename.rstrip('/')
                                 subdir_url = f"{url.rstrip('/')}/{subdir_name}"
                                 subdir_path = os.path.join(path, subdir_name) if path else subdir_name
