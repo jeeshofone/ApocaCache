@@ -1,0 +1,28 @@
+# ApocaCache Download List Configuration
+# This file specifies which Kiwix content should be downloaded and maintained
+
+content:
+  # English Wikipedia Sample
+  - name: "wikipedia_en_all_mini"
+    language: "eng"
+    category: "wikipedia"
+    description: "Wikipedia Mini in English"
+    
+  # Spanish Wiktionary Sample
+  - name: "wiktionary_es_all"
+    language: "spa"
+    category: "wiktionary"
+    description: "Complete Wiktionary in Spanish"
+    
+  # Medical Information Sample
+  - name: "wikipedia_en_medicine"
+    language: "eng"
+    category: "wikipedia"
+    description: "Medical Wikipedia Articles"
+
+# Configuration Options
+options:
+  max_concurrent_downloads: 2
+  retry_attempts: 3
+  verify_downloads: true
+  cleanup_incomplete: true 

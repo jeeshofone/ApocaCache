@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  library-maintainer:
+    build:
+      context: ./library-maintainer
+      dockerfile: Dockerfile
+    volumes:
+      - kiwix_data:/data
+      - ./examples/download-list.yaml:/config/download-list.yaml:ro
+    environment:
+      - LANGUAGE_FILTER=${LANGUAGE_FILTER:-}
+      - UPDATE_SCHEDULE=${UPDATE_SCHEDULE:-0 2 1 * *}
+      - DOWNLOAD_ALL=${DOWNLOAD_ALL:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.access('/data/library.xml', os.R_OK) or exit(1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+
+  kiwix-serve:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    volumes:
+      - kiwix_data:/data:ro
+    ports:
+      - "8080:8080"
+    command: --library /data/library.xml
+    depends_on:
+      library-maintainer:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+
+volumes:
+  kiwix_data:
+    name: apocacache_kiwix_data 
