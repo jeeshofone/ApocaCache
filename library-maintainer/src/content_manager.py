@@ -14,6 +14,7 @@ import aiohttp
 import aiofiles
 from bs4 import BeautifulSoup
 import structlog
+import traceback
 
 from config import Config, ContentItem
 import monitoring
@@ -64,25 +65,65 @@ class ContentManager:
     
     def _matches_content_pattern(self, filename: str) -> bool:
         """Check if filename matches content pattern."""
+        log.debug("content_pattern.checking", 
+                filename=filename, 
+                pattern=self.config.content_pattern)
+        
         if not self.config.content_pattern:
+            log.debug("content_pattern.no_pattern")
             return True
+            
         patterns = self.config.content_pattern.split('|')
+        log.debug("content_pattern.patterns", patterns=patterns)
+        
         for pattern in patterns:
-            if re.search(pattern, filename):
-                log.debug("content_pattern.matched", filename=filename, pattern=pattern)
-                return True
-        log.debug("content_pattern.no_match", filename=filename, patterns=patterns)
+            try:
+                if re.search(pattern, filename):
+                    log.debug("content_pattern.matched", 
+                            filename=filename, 
+                            pattern=pattern)
+                    return True
+            except re.error as e:
+                log.error("content_pattern.invalid", 
+                         pattern=pattern,
+                         error=str(e))
+                continue
+                
+        log.debug("content_pattern.no_match", 
+                filename=filename, 
+                patterns=patterns)
         return False
     
     def _matches_language_filter(self, filename: str) -> bool:
         """Check if filename matches language filter."""
+        log.debug("language_filter.checking", 
+                filename=filename, 
+                languages=self.config.language_filter)
+        
         if not self.config.language_filter:
+            log.debug("language_filter.no_filter")
             return True
+            
         for lang in self.config.language_filter:
-            if f"_{lang}_" in filename or f"_{lang}." in filename:
-                log.debug("language_filter.matched", filename=filename, language=lang)
-                return True
-        log.debug("language_filter.no_match", filename=filename, languages=self.config.language_filter)
+            if not lang:  # Skip empty language codes
+                continue
+                
+            patterns = [f"_{lang}_", f"_{lang}."]
+            log.debug("language_filter.patterns", 
+                    language=lang, 
+                    patterns=patterns)
+            
+            for pattern in patterns:
+                if pattern in filename:
+                    log.debug("language_filter.matched", 
+                            filename=filename, 
+                            pattern=pattern,
+                            language=lang)
+                    return True
+                    
+        log.debug("language_filter.no_match", 
+                filename=filename, 
+                languages=self.config.language_filter)
         return False
     
     async def _get_available_content(self) -> List[Tuple[str, str, int]]:
@@ -90,95 +131,182 @@ class ContentManager:
         async def scan_directory(url: str, path: str = "") -> List[Tuple[str, str, int]]:
             """Recursively scan a directory for content."""
             content_list = []
-            log.info("directory.scanning", url=url, path=path)
+            log.info("directory.scanning.start", 
+                    url=url, 
+                    path=path,
+                    scan_subdirs=self.config.scan_subdirs,
+                    content_pattern=self.config.content_pattern,
+                    language_filter=self.config.language_filter)
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        raise Exception(f"Failed to fetch content list: {response.status}")
-                    
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')  # Use html.parser instead of lxml
-                    
-                    # Find all links in the directory listing
-                    links = soup.find_all('a')
-                    if not links:
-                        log.error("content_list.parse_failed", error="No links found in directory listing")
-                        return []
-                    
-                    # Process each link
-                    for link in links:
-                        href = link.get('href')
-                        if not href or href == '../':
-                            continue
+            try:
+                log.debug("directory.http_session.creating")
+                async with aiohttp.ClientSession() as session:
+                    log.debug("directory.http_request.start", url=url)
+                    async with session.get(url) as response:
+                        log.debug("directory.http_response.received", 
+                                status=response.status,
+                                headers=dict(response.headers))
                         
-                        # Get the text after the link which contains size and date
-                        text = link.next_sibling
-                        if not text:
-                            continue
-                            
-                        text = text.strip()
-                        if not text:
-                            continue
+                        if response.status != 200:
+                            log.error("directory.http_request.failed", 
+                                    status=response.status,
+                                    url=url)
+                            raise Exception(f"Failed to fetch content list: {response.status}")
                         
-                        # Parse the text for size and date
-                        parts = text.split()
-                        if len(parts) < 3:
-                            continue
+                        log.debug("directory.content.reading")
+                        html = await response.text()
+                        log.debug("directory.content.received", 
+                                content_length=len(html),
+                                content_preview=html[:200])
+                        
+                        log.debug("directory.html.parsing")
+                        soup = BeautifulSoup(html, 'html.parser')
+                        
+                        # Find all links in the directory listing
+                        log.debug("directory.links.finding")
+                        links = soup.find_all('a')
+                        log.info("directory.links.found", count=len(links))
+                        
+                        if not links:
+                            log.error("directory.links.none_found", 
+                                    url=url,
+                                    html_preview=html[:500])
+                            return []
+                        
+                        # Process each link
+                        for link in links:
+                            log.debug("directory.link.processing", 
+                                    link_html=str(link),
+                                    link_text=link.text)
                             
-                        try:
-                            # Try to parse date and size
-                            date_str = f"{parts[0]} {parts[1]}"
-                            size_str = parts[2]
+                            href = link.get('href')
+                            if not href or href == '../':
+                                log.debug("directory.link.skipped", 
+                                        reason="invalid_href",
+                                        href=href)
+                                continue
                             
-                            # Convert size to bytes
-                            if size_str == '-':
-                                size = 0
-                            else:
-                                size = int(size_str)
+                            # Get the text after the link which contains size and date
+                            text = link.next_sibling
+                            if not text:
+                                log.debug("directory.link.skipped",
+                                        reason="no_metadata",
+                                        href=href)
+                                continue
                             
-                            filename = href.rstrip('/')
+                            text = text.strip()
+                            if not text:
+                                log.debug("directory.link.skipped",
+                                        reason="empty_metadata",
+                                        href=href)
+                                continue
                             
-                            if filename.endswith('.zim'):
-                                full_path = os.path.join(path, filename) if path else filename
-                                # Check if file matches content pattern and language filter
-                                matches_pattern = self._matches_content_pattern(filename)
-                                matches_language = self._matches_language_filter(filename)
+                            log.debug("directory.link.metadata",
+                                    href=href,
+                                    text=text)
+                            
+                            # Parse the text for size and date
+                            parts = text.split()
+                            if len(parts) < 3:
+                                log.debug("directory.link.skipped",
+                                        reason="insufficient_parts",
+                                        parts=parts)
+                                continue
+                            
+                            try:
+                                # Try to parse date and size
+                                date_str = f"{parts[0]} {parts[1]}"
+                                size_str = parts[2]
                                 
-                                if matches_pattern and matches_language:
-                                    content_list.append((full_path, date_str, size))
-                                    log.info("content_list.added_file", 
-                                           filename=full_path,
-                                           size=size,
-                                           date=date_str)
+                                log.debug("directory.link.parsing",
+                                        date=date_str,
+                                        size=size_str)
+                                
+                                # Convert size to bytes
+                                if size_str == '-':
+                                    size = 0
                                 else:
-                                    log.debug("content_list.filtered_file", 
-                                            filename=full_path,
+                                    size = int(size_str)
+                                
+                                filename = href.rstrip('/')
+                                
+                                if filename.endswith('.zim'):
+                                    full_path = os.path.join(path, filename) if path else filename
+                                    log.debug("directory.file.checking",
+                                            filename=filename,
+                                            full_path=full_path)
+                                    
+                                    # Check if file matches content pattern and language filter
+                                    matches_pattern = self._matches_content_pattern(filename)
+                                    matches_language = self._matches_language_filter(filename)
+                                    
+                                    log.debug("directory.file.matches",
+                                            filename=filename,
                                             matches_pattern=matches_pattern,
-                                            matches_language=matches_language)
-                            elif href.endswith('/') and self.config.scan_subdirs:
-                                # This is a directory, scan it recursively if scan_subdirs is enabled
-                                subdir_name = filename
-                                subdir_url = f"{url.rstrip('/')}/{subdir_name}"
-                                subdir_path = os.path.join(path, subdir_name) if path else subdir_name
-                                subdir_content = await scan_directory(subdir_url, subdir_path)
-                                content_list.extend(subdir_content)
-                                log.info("content_list.scanned_subdir", 
-                                       subdir=subdir_path,
-                                       files_found=len(subdir_content))
-                        except Exception as e:
-                            log.debug("content_list.parse_error", 
-                                    text=text,
-                                    error=str(e))
-                            continue
-                    
-                    return content_list
+                                            matches_language=matches_language,
+                                            pattern=self.config.content_pattern,
+                                            languages=self.config.language_filter)
+                                    
+                                    if matches_pattern and matches_language:
+                                        content_list.append((full_path, date_str, size))
+                                        log.info("directory.file.added", 
+                                               filename=full_path,
+                                               size=size,
+                                               date=date_str)
+                                    else:
+                                        log.debug("directory.file.filtered", 
+                                                filename=full_path,
+                                                matches_pattern=matches_pattern,
+                                                matches_language=matches_language)
+                                elif href.endswith('/') and self.config.scan_subdirs:
+                                    # This is a directory, scan it recursively if scan_subdirs is enabled
+                                    subdir_name = filename
+                                    subdir_url = f"{url.rstrip('/')}/{subdir_name}"
+                                    subdir_path = os.path.join(path, subdir_name) if path else subdir_name
+                                    
+                                    log.info("directory.subdir.scanning",
+                                            subdir=subdir_path,
+                                            url=subdir_url)
+                                    
+                                    subdir_content = await scan_directory(subdir_url, subdir_path)
+                                    content_list.extend(subdir_content)
+                                    
+                                    log.info("directory.subdir.scanned", 
+                                           subdir=subdir_path,
+                                           files_found=len(subdir_content))
+                            except Exception as e:
+                                log.error("directory.link.parse_failed", 
+                                        text=text,
+                                        error=str(e),
+                                        traceback=traceback.format_exc())
+                                continue
+                        
+                        log.info("directory.scanning.complete",
+                                url=url,
+                                path=path,
+                                files_found=len(content_list))
+                        return content_list
+                        
+            except Exception as e:
+                log.error("directory.scanning.failed",
+                         url=url,
+                         path=path,
+                         error=str(e),
+                         traceback=traceback.format_exc())
+                raise
         
-        content_list = await scan_directory(self.base_url)
-        log.info("content_list.complete", 
-                count=len(content_list), 
-                items=[item[0] for item in content_list])
-        return content_list
+        try:
+            log.info("content_list.scan.starting", base_url=self.base_url)
+            content_list = await scan_directory(self.base_url)
+            log.info("content_list.scan.complete", 
+                    count=len(content_list), 
+                    items=[item[0] for item in content_list])
+            return content_list
+        except Exception as e:
+            log.error("content_list.scan.failed",
+                     error=str(e),
+                     traceback=traceback.format_exc())
+            raise
     
     async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
         """Download a file with progress tracking and verification."""
