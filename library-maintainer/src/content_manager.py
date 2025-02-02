@@ -172,11 +172,35 @@ class ContentManager:
             available_content = await self._get_available_content()
             download_tasks = []
             
+            log.debug("content_update.filtering", 
+                     content_count=len(available_content),
+                     language_filter=self.config.language_filter,
+                     content_pattern=self.config.content_pattern,
+                     download_all=self.config.download_all)
+            
             for content_item in self.config.content_list:
+                log.debug("content_update.checking_item", 
+                         content_name=content_item.name,
+                         content_language=content_item.language,
+                         content_category=content_item.category)
+                
                 # Find matching content
                 for filepath, date_str, size in available_content:
                     filename = os.path.basename(filepath)
+                    log.debug("content_update.checking_file", 
+                             filename=filename,
+                             filepath=filepath,
+                             date=date_str,
+                             size=size,
+                             matches_pattern=bool(re.match(self.config.content_pattern, filename)),
+                             matches_language=content_item.language in self.config.language_filter if self.config.language_filter else True)
+                    
                     if filename == f"{content_item.name}.zim" or filename.startswith(f"{content_item.name}.zim"):
+                        log.info("content_update.found_match",
+                                content_name=content_item.name,
+                                filename=filename,
+                                filepath=filepath)
+                        
                         # Create category subdirectory
                         category_dir = os.path.join(self.config.data_dir, content_item.category)
                         os.makedirs(category_dir, exist_ok=True)

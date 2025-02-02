@@ -7,16 +7,19 @@ services:
         - UID=1000
         - GID=1000
     environment:
-      - LANGUAGE_FILTER=en
+      - LANGUAGE_FILTER=eng,en  # Support both eng and en language codes
       - DOWNLOAD_ALL=true
       - UPDATE_SCHEDULE=0 2 * * *  # Run at 2 AM daily
       - MAX_CONCURRENT_DOWNLOADS=3
       - VERIFY_DOWNLOADS=true
-      - LOG_LEVEL=INFO
-      - CONTENT_PATTERN=.*_en.*|.*english.*  # Match any content with 'en' or 'english' in the name
+      - LOG_LEVEL=DEBUG  # Enhanced logging level
+      - DEBUG_CONTENT_MATCHING=true  # Add detailed content matching logs
+      - PRINT_CONTENT_LIST=true  # Print full content list being processed
+      - CONTENT_PATTERN=.*_en.*|.*english.*|.*_eng_.*|.*_en_all.*  # Enhanced pattern to match more English content variants
       - SCAN_SUBDIRS=true  # Scan all subdirectories
       - MEMORY_LIMIT=4G  # Increase memory limit for larger datasets
       - DOWNLOAD_TIMEOUT=3600  # Increase download timeout to 1 hour
+      - BASE_URL=https://download.kiwix.org/zim/  # Explicitly set the base URL
     volumes:
       - ./kiwix:/data:rw
     user: "1000:1000"
