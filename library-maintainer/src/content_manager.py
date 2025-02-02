@@ -71,16 +71,32 @@ class ContentManager:
                 
                 # Process each line
                 for line in pre.get_text().split('\n'):
+                    log.info("content_list.parsing_line", line=line)
                     if line.strip() and not line.startswith('../'):
-                        # Parse line using regex
+                        # Try mock server format first (filename size date)
                         match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
-                        if match:
+                        if not match:
+                            # Try production format
+                            match = re.match(r'(.+?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+(\d+)', line.strip())
+                            if match:
+                                filename = match.group(1).strip()
+                                size = int(match.group(3))
+                                date_str = match.group(2)
+                                log.info("content_list.matched_production", filename=filename, size=size, date=date_str)
+                            else:
+                                log.error("content_list.no_match", line=line)
+                                continue
+                        else:
                             filename = match.group(1).strip()
-                            if filename.endswith('.zim'):
-                                size = int(match.group(2))
-                                date_str = match.group(3)
-                                content_list.append((filename, date_str, size))
+                            size = int(match.group(2))
+                            date_str = match.group(3)
+                            log.info("content_list.matched_mock", filename=filename, size=size, date=date_str)
+                        
+                        if filename.endswith('.zim'):
+                            content_list.append((filename, date_str, size))
+                            log.info("content_list.added", filename=filename)
                 
+                log.info("content_list.complete", count=len(content_list), items=content_list)
                 return content_list
     
     async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
@@ -137,40 +153,41 @@ class ContentManager:
             download_tasks = []
             
             for content_item in self.config.content_list:
-                if not self.config.should_download_content(content_item):
-                    continue
-                
                 # Find matching content
                 for filename, date_str, size in available_content:
-                    if filename.startswith(f"{content_item.name}.zim"):
+                    if filename == f"{content_item.name}.zim" or filename.startswith(f"{content_item.name}.zim"):
                         dest_path = os.path.join(
                             self.config.data_dir,
                             filename
                         )
                         
-                        # Check if update needed
-                        state = self.content_state.get(content_item.name, {})
-                        if (not os.path.exists(dest_path) or
-                            state.get('last_updated') != date_str):
-                            
-                            # Update state before download
-                            self.content_state[content_item.name] = {
-                                'last_updated': date_str,
-                                'size': size,
-                                'path': dest_path
-                            }
-                            
-                            download_tasks.append(
-                                self._download_file(
-                                    filename,
-                                    dest_path,
-                                    content_item
-                                )
+                        # Create state for this content
+                        state = {
+                            'last_updated': date_str,
+                            'size': size,
+                            'path': dest_path
+                        }
+                        
+                        # Update state immediately
+                        self.content_state[content_item.name] = state
+                        
+                        # Check if download/update needed
+                        if self.config.should_download_content(content_item) and \
+                           (not os.path.exists(dest_path) or \
+                           self.content_state.get(content_item.name, {}).get('last_updated') != date_str):
+                            download_task = self._download_file(
+                                filename,
+                                dest_path,
+                                content_item
                             )
+                            download_tasks.append(download_task)
+                        break  # Found matching file, no need to check more
             
             if download_tasks:
                 results = await asyncio.gather(*download_tasks)
-                await self._save_state()
+                
+            # Always save state after updates
+            await self._save_state()
             
             duration = time.time() - start_time
             monitoring.set_update_duration(duration)

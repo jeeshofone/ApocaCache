@@ -70,6 +70,9 @@ async def test_update_content(content_manager):
         )
     ]
     
+    # Set language filter to include English
+    content_manager.config.language_filter = ["eng"]
+    
     # Run update
     await content_manager.update_content()
     
