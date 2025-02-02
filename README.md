@@ -1,6 +1,58 @@
 # ApocaCache
 
-A containerized solution for hosting and managing Kiwix content libraries. ApocaCache consists of two main containers that work together to provide an automated, self-updating Kiwix server.
+A distributed caching system for Kiwix ZIM files.
+
+## Project Status (2025-02-02)
+Currently in development, focusing on the library maintainer component. Integration tests are being implemented and debugged.
+
+### Components
+- **Library Maintainer**: Manages ZIM file downloads and library.xml generation
+- **Mock Kiwix Server**: Test infrastructure for integration testing
+
+### Current Development Focus
+- Integration testing of content download functionality
+- Mock server configuration for testing
+- Async fixture handling in pytest
+
+### Recent Changes
+- Fixed async fixture configuration
+- Updated mock server configuration
+- Improved content manager URL handling
+- Enhanced test infrastructure
+
+## Development Setup
+
+### Prerequisites
+- Python 3.11+
+- Docker and Docker Compose
+- pytest for testing
+
+### Running Tests
+```bash
+cd library-maintainer
+docker-compose -f tests/docker-compose.test.yaml down -v
+docker-compose -f tests/docker-compose.test.yaml build --no-cache
+docker-compose -f tests/docker-compose.test.yaml run --rm integration-tests pytest tests/ -v
+```
+
+## Project Structure
+```
+library-maintainer/
+├── src/
+│   ├── content_manager.py
+│   ├── library_manager.py
+│   └── config.py
+├── tests/
+│   ├── integration/
+│   │   ├── test_content_manager.py
+│   │   └── test_library_manager.py
+│   └── fixtures/
+│       └── mock-kiwix-server/
+└── docker-compose.test.yaml
+```
+
+## Contributing
+Currently in active development. See todo.md for current tasks and progress.
 
 ## Overview
 
@@ -77,14 +129,6 @@ python -m pytest
 
 [MIT License](LICENSE)
 
-## Contributing
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
 ## Security
 
-Please report security issues to [security contact].
-
-## Project Status
-
-Last updated: $(date '+%Y-%m-%d') 
+Please report security issues to [security contact]. 

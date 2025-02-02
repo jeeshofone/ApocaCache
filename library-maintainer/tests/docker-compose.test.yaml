@@ -1,0 +1,51 @@
+name: apocacache-test
+
+services:
+  # Mock Kiwix server for testing
+  mock-kiwix-server:
+    build:
+      context: ./fixtures/mock-kiwix-server
+      dockerfile: Dockerfile
+    ports:
+      - "8181:80"
+    volumes:
+      - ./fixtures/mock-kiwix-server/content:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Library maintainer under test
+  library-maintainer-test:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.test
+    volumes:
+      - test_data:/data
+    environment:
+      - KIWIX_SERVER_URL=http://mock-kiwix-server
+      - LANGUAGE_FILTER=eng
+      - UPDATE_SCHEDULE=* * * * *
+      - DOWNLOAD_ALL=false
+      - PYTHONPATH=/app
+    depends_on:
+      mock-kiwix-server:
+        condition: service_healthy
+
+  # Integration test runner
+  integration-tests:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.test
+    volumes:
+      - test_data:/data:ro
+    environment:
+      - PYTHONPATH=/app
+    command: pytest integration/
+    depends_on:
+      - library-maintainer-test
+
+volumes:
+  test_data:
+    name: apocacache_test_data 

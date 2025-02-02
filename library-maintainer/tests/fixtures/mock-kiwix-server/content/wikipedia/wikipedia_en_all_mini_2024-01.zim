@@ -1,0 +1,16 @@
+MOCK_ZIM_FILE_CONTENT
+This is a mock ZIM file for testing purposes.
+It simulates the structure of a real ZIM file but contains only test data.
+
+[Metadata]
+Title=Wikipedia Mini
+Language=eng
+Publisher=Kiwix
+Description=Wikipedia Mini in English
+Date=2024-01
+Creator=Wikipedia
+Size=1024
+
+[Content]
+This section would normally contain compressed Wikipedia content.
+For testing purposes, this is just placeholder text. 
