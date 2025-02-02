@@ -30,6 +30,89 @@ Integration tests are now fully implemented and passing. The library maintainer 
 - Content validation
 - Documentation improvements
 
+## Quick Start
+
+### Basic Setup
+```bash
+# Clone the repository
+git clone https://github.com/jeeshofone/ApocaCache.git
+cd ApocaCache
+
+# Create data directory
+sudo mkdir -p /kiwix
+sudo chown -R 1000:1000 /kiwix
+
+# Start the services
+docker-compose up -d
+```
+
+### Example Configurations
+
+#### Download All English Content
+Create a `docker-compose.yaml` file:
+
+```yaml
+version: '3.8'
+
+services:
+  library-maintainer:
+    image: apocacache/library-maintainer:latest
+    environment:
+      - LANGUAGE_FILTER=eng
+      - DOWNLOAD_ALL=true
+      - UPDATE_SCHEDULE=0 2 * * *  # Run at 2 AM daily
+    volumes:
+      - /kiwix:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  kiwix-serve:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - /kiwix:/data:ro
+    depends_on:
+      library-maintainer:
+        condition: service_healthy
+    command: --library /data/library.xml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/catalog"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+More example configurations can be found in the `examples/` directory.
+
+## Configuration
+
+### Environment Variables
+
+- `LANGUAGE_FILTER`: Filter content by language codes (e.g., "eng,spa")
+- `UPDATE_SCHEDULE`: Cron expression for update schedule (default: "0 2 1 * *")
+- `DOWNLOAD_ALL`: Boolean flag to download all available content (default: false)
+
+### Custom Download List
+
+Create a `download-list.yaml` file:
+
+```yaml
+content:
+  - name: "wikipedia_en"
+    language: "eng"
+    category: "wikipedia"
+  - name: "wiktionary_es"
+    language: "spa"
+    category: "wiktionary"
+```
+
 ## Development Setup
 
 ### Prerequisites
@@ -79,61 +162,6 @@ ApocaCache automates the process of downloading, managing, and serving Kiwix ZIM
 2. **Kiwix Serve Container**: Serves the content using the official Kiwix server
    - Based on ghcr.io/kiwix/kiwix-serve:latest
    - Configured to serve content from shared volume
-
-## Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/jeeshofone/ApocaCache.git
-cd ApocaCache
-
-# Start the services
-docker-compose up -d
-```
-
-## Configuration
-
-### Environment Variables
-
-- `LANGUAGE_FILTER`: Filter content by language codes (e.g., "eng,spa")
-- `UPDATE_SCHEDULE`: Cron expression for update schedule (default: "0 2 1 * *")
-- `DOWNLOAD_ALL`: Boolean flag to download all available content (default: false)
-
-### Custom Download List
-
-Create a `download-list.yaml` file:
-
-```yaml
-content:
-  - name: "wikipedia_en"
-    language: "eng"
-    category: "wikipedia"
-  - name: "wiktionary_es"
-    language: "spa"
-    category: "wiktionary"
-```
-
-## Development
-
-### Prerequisites
-
-- Docker
-- Docker Compose
-- Python 3.11+
-
-### Building
-
-```bash
-# Build for multiple architectures
-./library-maintainer/build.sh
-```
-
-### Testing
-
-```bash
-cd library-maintainer
-python -m pytest
-```
 
 ## License
 
