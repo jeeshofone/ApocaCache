@@ -9,6 +9,7 @@ services:
       - LANGUAGE_FILTER=eng
       - DOWNLOAD_ALL=true
       - UPDATE_SCHEDULE=0 2 * * *  # Run at 2 AM daily
+      - KIWIX_SERVER_URL=http://kiwix-serve:8080
     volumes:
       - /kiwix:/data
     restart: unless-stopped
