@@ -1,0 +1,6 @@
+extends: default
+
+overrides:
+  - pattern: "**/docker-compose*.yaml"
+    rules:
+      everything: disable 
