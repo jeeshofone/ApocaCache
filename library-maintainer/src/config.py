@@ -7,6 +7,9 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 import yaml
+import structlog
+
+log = structlog.get_logger()
 
 @dataclass
 class ContentItem:
@@ -34,7 +37,7 @@ class Config:
         self.library_file = os.path.join(self.data_dir, "library.xml")
         
         # Always use the official Kiwix download server
-        self.base_url = "https://download.kiwix.org/zim/"
+        self.base_url = os.getenv("BASE_URL", "https://download.kiwix.org/zim/")
         
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")
@@ -60,24 +63,35 @@ class Config:
     
     def _load_download_list(self):
         """Load and parse the download list configuration."""
-        config_file = os.path.join(self.config_dir, "download-list.yaml")
+        config_file = os.path.join(self.data_dir, "download-list.yaml")
         
         if not os.path.exists(config_file):
+            log.warning("download_list.not_found", path=config_file)
             return
         
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        
-        # Parse content items
-        if "content" in config:
-            self.content_list = [
-                ContentItem(**item)
-                for item in config["content"]
-            ]
-        
-        # Parse options
-        if "options" in config:
-            self.options = ContentOptions(**config["options"])
+        try:
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+                log.info("download_list.loaded", path=config_file)
+            
+            # Parse content items
+            if "content" in config:
+                self.content_list = [
+                    ContentItem(**item)
+                    for item in config["content"]
+                ]
+                log.info("download_list.parsed", items=len(self.content_list))
+            else:
+                log.warning("download_list.no_content", path=config_file)
+            
+            # Parse options
+            if "options" in config:
+                self.options = ContentOptions(**config["options"])
+                log.info("download_list.options_parsed", 
+                        max_concurrent_downloads=self.options.max_concurrent_downloads,
+                        retry_attempts=self.options.retry_attempts)
+        except Exception as e:
+            log.error("download_list.parse_failed", error=str(e))
     
     def should_download_content(self, content: ContentItem) -> bool:
         """Check if content should be downloaded based on filters."""

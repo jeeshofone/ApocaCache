@@ -108,54 +108,52 @@ class ContentManager:
                     
                     # Process each line
                     for line in pre.get_text().split('\n'):
-                        log.debug("content_list.parsing_line", line=line)
-                        if line.strip() and not line.startswith('../'):
-                            # Try mock server format first (filename size date)
-                            match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
-                            if not match:
-                                # Try production format
-                                match = re.match(r'(.+?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+(\d+)', line.strip())
-                                if match:
-                                    filename = match.group(1).strip()
-                                    size = int(match.group(3))
-                                    date_str = match.group(2)
-                                    log.debug("content_list.matched_production", filename=filename, size=size, date=date_str)
-                                else:
-                                    log.debug("content_list.no_match", line=line)
-                                    continue
-                            else:
-                                filename = match.group(1).strip()
-                                size = int(match.group(2))
-                                date_str = match.group(3)
-                                log.debug("content_list.matched_mock", filename=filename, size=size, date=date_str)
+                        if not line.strip() or line.startswith('../'):
+                            continue
                             
-                            if filename.endswith('.zim'):
-                                full_path = os.path.join(path, filename) if path else filename
-                                # Check if file matches content pattern and language filter
-                                matches_pattern = self._matches_content_pattern(filename)
-                                matches_language = self._matches_language_filter(filename)
-                                
-                                if matches_pattern and matches_language:
-                                    content_list.append((full_path, date_str, size))
-                                    log.info("content_list.added_file", 
-                                           filename=full_path,
-                                           size=size,
-                                           date=date_str)
-                                else:
-                                    log.debug("content_list.filtered_file", 
-                                            filename=full_path,
-                                            matches_pattern=matches_pattern,
-                                            matches_language=matches_language)
-                            elif filename.endswith('/') and self.config.scan_subdirs:
-                                # This is a directory, scan it recursively if scan_subdirs is enabled
-                                subdir_name = filename.rstrip('/')
-                                subdir_url = f"{url.rstrip('/')}/{subdir_name}"
-                                subdir_path = os.path.join(path, subdir_name) if path else subdir_name
-                                subdir_content = await scan_directory(subdir_url, subdir_path)
-                                content_list.extend(subdir_content)
-                                log.info("content_list.scanned_subdir", 
-                                       subdir=subdir_path,
-                                       files_found=len(subdir_content))
+                        # Try mock server format first (filename size date)
+                        match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
+                        if not match:
+                            # Try production format
+                            match = re.match(r'(.+?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+(\d+)', line.strip())
+                            if match:
+                                filename = match.group(1).strip()
+                                size = int(match.group(3))
+                                date_str = match.group(2)
+                            else:
+                                continue
+                        else:
+                            filename = match.group(1).strip()
+                            size = int(match.group(2))
+                            date_str = match.group(3)
+                        
+                        if filename.endswith('.zim'):
+                            full_path = os.path.join(path, filename) if path else filename
+                            # Check if file matches content pattern and language filter
+                            matches_pattern = self._matches_content_pattern(filename)
+                            matches_language = self._matches_language_filter(filename)
+                            
+                            if matches_pattern and matches_language:
+                                content_list.append((full_path, date_str, size))
+                                log.info("content_list.added_file", 
+                                       filename=full_path,
+                                       size=size,
+                                       date=date_str)
+                            else:
+                                log.debug("content_list.filtered_file", 
+                                        filename=full_path,
+                                        matches_pattern=matches_pattern,
+                                        matches_language=matches_language)
+                        elif filename.endswith('/') and self.config.scan_subdirs:
+                            # This is a directory, scan it recursively if scan_subdirs is enabled
+                            subdir_name = filename.rstrip('/')
+                            subdir_url = f"{url.rstrip('/')}/{subdir_name}"
+                            subdir_path = os.path.join(path, subdir_name) if path else subdir_name
+                            subdir_content = await scan_directory(subdir_url, subdir_path)
+                            content_list.extend(subdir_content)
+                            log.info("content_list.scanned_subdir", 
+                                   subdir=subdir_path,
+                                   files_found=len(subdir_content))
                     
                     return content_list
         
