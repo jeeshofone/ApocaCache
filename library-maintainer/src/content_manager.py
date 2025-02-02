@@ -108,18 +108,19 @@ class ContentManager:
             if not lang:  # Skip empty language codes
                 continue
                 
-            patterns = [f"_{lang}_", f"_{lang}."]
-            log.debug("language_filter.patterns", 
+            # Match language codes in Kiwix format
+            # Example: wikipedia_en_all_maxi_2024-05.zim
+            pattern = f"_{lang}_all_"
+            log.debug("language_filter.pattern", 
                     language=lang, 
-                    patterns=patterns)
+                    pattern=pattern)
             
-            for pattern in patterns:
-                if pattern in filename:
-                    log.debug("language_filter.matched", 
-                            filename=filename, 
-                            pattern=pattern,
-                            language=lang)
-                    return True
+            if pattern in filename:
+                log.debug("language_filter.matched", 
+                        filename=filename, 
+                        pattern=pattern,
+                        language=lang)
+                return True
                     
         log.debug("language_filter.no_match", 
                 filename=filename, 
@@ -394,65 +395,84 @@ class ContentManager:
                          content_category=content_item.category)
                 
                 # Find matching content
+                latest_version = None
+                latest_date = None
+                
+                # Pattern for matching content files
+                # Example: wikipedia_en_all_maxi_2024-05.zim
+                pattern = f"{content_item.category}_{content_item.language}_all_.*_\\d{{4}}-\\d{{2}}.zim$"
+                log.debug("content_update.pattern", pattern=pattern)
+                
                 for filepath, date_str, size in available_content:
                     filename = os.path.basename(filepath)
                     log.debug("content_update.checking_file", 
                              filename=filename,
                              filepath=filepath,
                              date=date_str,
-                             size=size,
-                             matches_pattern=bool(re.match(self.config.content_pattern, filename)),
-                             matches_language=content_item.language in self.config.language_filter if self.config.language_filter else True)
+                             size=size)
                     
-                    if filename == f"{content_item.name}.zim" or filename.startswith(f"{content_item.name}.zim"):
+                    if re.match(pattern, filename):
                         log.info("content_update.found_match",
                                 content_name=content_item.name,
                                 filename=filename,
-                                filepath=filepath)
+                                filepath=filepath,
+                                date=date_str)
                         
-                        # Create category subdirectory
-                        category_dir = os.path.join(self.config.data_dir, content_item.category)
-                        os.makedirs(category_dir, exist_ok=True)
+                        # Keep track of the latest version
+                        if not latest_date or date_str > latest_date:
+                            latest_version = (filepath, date_str, size)
+                            latest_date = date_str
+                
+                if latest_version:
+                    filepath, date_str, size = latest_version
+                    filename = os.path.basename(filepath)
+                    
+                    # Create category subdirectory
+                    category_dir = os.path.join(self.config.data_dir, content_item.category)
+                    os.makedirs(category_dir, exist_ok=True)
+                    
+                    dest_path = os.path.join(
+                        category_dir,
+                        filename
+                    )
+                    
+                    # Create state for this content
+                    state = {
+                        'last_updated': date_str,
+                        'size': size,
+                        'path': dest_path
+                    }
+                    
+                    # Update state immediately
+                    self.content_state[content_item.name] = state
+                    
+                    # Check if download/update needed
+                    if self.config.should_download_content(content_item):
+                        needs_download = not os.path.exists(dest_path)
+                        needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != date_str
                         
-                        dest_path = os.path.join(
-                            category_dir,
-                            filename
-                        )
+                        log.info("content_update.download_check",
+                                content_name=content_item.name,
+                                needs_download=needs_download,
+                                needs_update=needs_update,
+                                current_date=self.content_state.get(content_item.name, {}).get('last_updated'),
+                                new_date=date_str)
                         
-                        # Create state for this content
-                        state = {
-                            'last_updated': date_str,
-                            'size': size,
-                            'path': dest_path
-                        }
-                        
-                        # Update state immediately
-                        self.content_state[content_item.name] = state
-                        
-                        # Check if download/update needed
-                        if self.config.should_download_content(content_item):
-                            needs_download = not os.path.exists(dest_path)
-                            needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != date_str
-                            
-                            log.info("content_update.download_check",
+                        if needs_download or needs_update:
+                            log.info("content_update.queueing_download",
                                     content_name=content_item.name,
-                                    needs_download=needs_download,
-                                    needs_update=needs_update,
-                                    current_date=self.content_state.get(content_item.name, {}).get('last_updated'),
-                                    new_date=date_str)
-                            
-                            if needs_download or needs_update:
-                                log.info("content_update.queueing_download",
-                                        content_name=content_item.name,
-                                        filename=filename,
-                                        size=size)
-                                download_task = self._download_file(
-                                    filepath,  # Use the full path from the server
-                                    dest_path,
-                                    content_item
-                                )
-                                download_tasks.append(download_task)
-                        break  # Found matching file, no need to check more
+                                    filename=filename,
+                                    size=size)
+                            download_task = self._download_file(
+                                filepath,  # Use the full path from the server
+                                dest_path,
+                                content_item
+                            )
+                            download_tasks.append(download_task)
+                else:
+                    log.warning("content_update.no_match_found",
+                              content_name=content_item.name,
+                              pattern=pattern)
             
             if download_tasks:
                 log.info("content_update.starting_downloads", count=len(download_tasks))
