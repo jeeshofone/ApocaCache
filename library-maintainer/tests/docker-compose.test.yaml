@@ -1,4 +1,8 @@
-name: apocacache-test
+# yamllint disable-all
+
+# This docker-compose file is intentionally using 'version', 'services', and 'volumes' as per docker-compose spec
+
+version: "3.8"
 
 services:
   # Mock Kiwix server for testing
@@ -16,11 +20,11 @@ services:
       timeout: 5s
       retries: 3
 
-  # Library maintainer under test
-  library-maintainer-test:
+  # Library maintainer under test (using production container)
+  library-maintainer:
     build:
       context: ..
-      dockerfile: tests/Dockerfile.test
+      dockerfile: Dockerfile
     volumes:
       - test_data:/data
     environment:
@@ -28,24 +32,27 @@ services:
       - LANGUAGE_FILTER=eng
       - UPDATE_SCHEDULE=* * * * *
       - DOWNLOAD_ALL=false
-      - PYTHONPATH=/app
+      - TESTING=true
     depends_on:
       mock-kiwix-server:
         condition: service_healthy
 
-  # Integration test runner
-  integration-tests:
+  # Test runner
+  test-runner:
     build:
       context: ..
       dockerfile: tests/Dockerfile.test
+    working_dir: /app
     volumes:
-      - test_data:/data:ro
+      - test_data:/data
+      - ..:/app:ro
     environment:
-      - PYTHONPATH=/app
-    command: pytest integration/
+      - PYTHONPATH=/app/src
+      - TESTING=true
     depends_on:
-      - library-maintainer-test
+      - library-maintainer
+      - mock-kiwix-server
 
 volumes:
   test_data:
-    name: apocacache_test_data 
+    driver: local 
