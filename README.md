@@ -186,4 +186,20 @@ The run_tests.sh script will:
 - Build Docker images without using the cache.
 - Set the TESTING environment variable to "true" so that tests use the sample ZIM file from [https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim](https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim).
 - Run the test suite using the docker-compose configuration from library-maintainer/tests/docker-compose.test.yaml.
-- Automatically shut down the Docker containers upon completion. 
+- Automatically shut down the Docker containers upon completion.
+
+## First Run Setup
+
+This project is designed to work immediately after cloning. The repository has been pre-configured with default settings to ensure a smooth first run:
+
+- A default library file is provided at `examples/kiwix/library.xml`. This file contains a default entry for the Wikipedia (English, no pics) zim file from the official Kiwix server, ensuring that the library maintainer finds content to download.
+- The Docker Compose configuration in `examples/docker-compose-english-all.yaml` maps the `./kiwix` directory to `/data` in the containers, so the default library file is automatically used.
+- To start the project, run:
+
+  docker compose -f examples/docker-compose-english-all.yaml up
+
+- The library maintainer service will parse the default library file and trigger a download of the content (if not already present) from the official Kiwix server.
+
+If you encounter any issues on first run, please ensure that the volume mappings and file permissions are correctly configured, and verify that the default entries in `examples/kiwix/library.xml` suit your needs.
+
+--- 

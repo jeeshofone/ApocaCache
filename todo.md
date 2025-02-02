@@ -60,4 +60,8 @@ Next steps:
 - Investigate why integration tests are not being discovered (collected 0 items) in /app/tests/integration.
   * Verify that test files have correct naming conventions (e.g., test_*.py) and that __init__.py exists in tests/integration.
 - Fix any test discovery issues.
-- Continue to commit and push changes frequently as part of continuous integration. 
+- Continue to commit and push changes frequently as part of continuous integration.
+
+# First Run Experience Improvements
+- [x] Created a default library file in `examples/kiwix/library.xml` with a default Wikipedia zim entry.
+- [x] Updated `README.md` with a 'First Run Setup' section detailing how the project works out-of-the-box. 
