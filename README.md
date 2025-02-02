@@ -101,6 +101,7 @@ More example configurations can be found in the `examples/` directory.
 - `LANGUAGE_FILTER`: Filter content by language codes (e.g., "eng,spa")
 - `UPDATE_SCHEDULE`: Cron expression for update schedule (default: "0 2 1 * *")
 - `DOWNLOAD_ALL`: Boolean flag to download all available content (default: false)
+- `KIWIX_SERVER_URL`: URL for the Kiwix server (default: "http://kiwix-serve")
 
 ### Custom Download List
 

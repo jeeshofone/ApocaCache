@@ -32,6 +32,7 @@ class Config:
         self.data_dir = "/data"
         self.config_dir = "/config"
         self.library_file = os.path.join(self.data_dir, "library.xml")
+        self.base_url = os.getenv("KIWIX_SERVER_URL", "http://kiwix-serve")
         
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")
