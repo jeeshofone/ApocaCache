@@ -156,8 +156,12 @@ class ContentManager:
                 # Find matching content
                 for filename, date_str, size in available_content:
                     if filename == f"{content_item.name}.zim" or filename.startswith(f"{content_item.name}.zim"):
+                        # Create category subdirectory
+                        category_dir = os.path.join(self.config.data_dir, content_item.category)
+                        os.makedirs(category_dir, exist_ok=True)
+                        
                         dest_path = os.path.join(
-                            self.config.data_dir,
+                            category_dir,
                             filename
                         )
                         

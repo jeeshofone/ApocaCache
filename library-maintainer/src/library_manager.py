@@ -52,36 +52,39 @@ class LibraryManager:
             # Track total library size
             total_size = 0
             
-            # Add book elements for each ZIM file
-            for filename in os.listdir(self.config.data_dir):
-                if filename.endswith('.zim'):
-                    filepath = os.path.join(self.config.data_dir, filename)
-                    size = os.path.getsize(filepath)
-                    total_size += size
-                    
-                    # Get metadata
-                    metadata = self._get_zim_metadata(filepath)
-                    
-                    # Create book element
-                    book = ET.SubElement(root, 'book')
-                    book.set('id', f"kiwix_{metadata['name']}")
-                    book.set('path', filepath)
-                    
-                    # Add metadata elements
-                    ET.SubElement(book, 'title').text = metadata['name']
-                    ET.SubElement(book, 'creator').text = metadata['creator']
-                    ET.SubElement(book, 'publisher').text = metadata['publisher']
-                    ET.SubElement(book, 'date').text = metadata['date']
-                    ET.SubElement(book, 'description').text = metadata['description']
-                    ET.SubElement(book, 'language').text = metadata['language']
-                    ET.SubElement(book, 'size').text = str(size)
-                    
-                    # Add URL for source
-                    if os.getenv("TESTING", "false").lower() == "true":
-                        url = "https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim"
-                    else:
-                        url = f"{self.config.base_url}{metadata['creator']}/{filename}"
-                    ET.SubElement(book, 'url').text = url
+            # Walk through all subdirectories
+            for root_dir, dirs, files in os.walk(self.config.data_dir):
+                for filename in files:
+                    if filename.endswith('.zim'):
+                        # Get relative path from data directory
+                        rel_path = os.path.relpath(os.path.join(root_dir, filename), self.config.data_dir)
+                        filepath = os.path.join(self.config.data_dir, rel_path)
+                        size = os.path.getsize(filepath)
+                        total_size += size
+                        
+                        # Get metadata
+                        metadata = self._get_zim_metadata(filepath)
+                        
+                        # Create book element
+                        book = ET.SubElement(root, 'book')
+                        book.set('id', f"kiwix_{metadata['name']}")
+                        book.set('path', rel_path)  # Use relative path
+                        
+                        # Add metadata elements
+                        ET.SubElement(book, 'title').text = metadata['name']
+                        ET.SubElement(book, 'creator').text = metadata['creator']
+                        ET.SubElement(book, 'publisher').text = metadata['publisher']
+                        ET.SubElement(book, 'date').text = metadata['date']
+                        ET.SubElement(book, 'description').text = metadata['description']
+                        ET.SubElement(book, 'language').text = metadata['language']
+                        ET.SubElement(book, 'size').text = str(size)
+                        
+                        # Add URL for source
+                        if os.getenv("TESTING", "false").lower() == "true":
+                            url = "https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim"
+                        else:
+                            url = f"{self.config.base_url}{metadata['creator']}/{filename}"
+                        ET.SubElement(book, 'url').text = url
             
             # Format XML with proper indentation
             xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
