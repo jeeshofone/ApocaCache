@@ -30,4 +30,6 @@ Last Updated: 2025-02-02 22:01
 - Advanced caching strategies
 - Multi-node support
 - Custom content filters
-- Automated backup system 
+- Automated backup system
+
+2023-10-27: Updated library-maintainer configuration to always pull ZIM files from https://download.kiwix.org/zim/; removed dependency on local kiwix-serve URL. 

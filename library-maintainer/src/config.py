@@ -32,7 +32,7 @@ class Config:
         self.data_dir = "/data"
         self.config_dir = "/config"
         self.library_file = os.path.join(self.data_dir, "library.xml")
-        self.base_url = os.getenv("KIWIX_SERVER_URL", "http://kiwix-serve")
+        self.base_url = "https://download.kiwix.org/zim/"  # Force pulling ZIM files only from external source
         
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")

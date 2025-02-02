@@ -76,4 +76,6 @@ Created detailed documentation for the library maintainer component, including:
 - Flow of operations
 - Configuration options
 - Development guidelines
-- Future improvements 
+- Future improvements
+
+2023-10-27: User asked 'what does the kiwix-serve do?' 
