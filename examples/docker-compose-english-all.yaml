@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   library-maintainer:
-    image: apocacache/library-maintainer:latest
+    build:
+      context: ../library-maintainer
+      dockerfile: Dockerfile
     environment:
       - LANGUAGE_FILTER=eng
       - DOWNLOAD_ALL=true

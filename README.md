@@ -42,7 +42,8 @@ cd ApocaCache
 sudo mkdir -p /kiwix
 sudo chown -R 1000:1000 /kiwix
 
-# Start the services
+# Build and start the services
+docker-compose build
 docker-compose up -d
 ```
 
@@ -56,7 +57,9 @@ version: '3.8'
 
 services:
   library-maintainer:
-    image: apocacache/library-maintainer:latest
+    build:
+      context: ../library-maintainer
+      dockerfile: Dockerfile
     environment:
       - LANGUAGE_FILTER=eng
       - DOWNLOAD_ALL=true
@@ -119,6 +122,15 @@ content:
 - Python 3.11+
 - Docker and Docker Compose
 - pytest for testing
+
+### Building Images
+```bash
+# Build all images
+docker-compose build
+
+# Build specific service
+docker-compose build library-maintainer
+```
 
 ### Running Tests
 ```bash
