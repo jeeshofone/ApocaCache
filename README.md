@@ -2,33 +2,36 @@
 
 A distributed caching system for Kiwix ZIM files.
 
-## Project Status (2025-02-02 21:50)
-Integration tests are now fully implemented and passing. The library maintainer component is stable and ready for feature enhancements.
+## Project Status ($(date '+%Y-%m-%d %H:%M'))
+All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic and content state management.
 
 ### Components
 - **Library Maintainer**: Manages ZIM file downloads and library.xml generation
-  - Content state management
-  - Concurrent downloads
-  - Progress tracking
-  - Atomic updates
+  - Content state management with atomic updates
+  - Concurrent downloads with semaphore control
+  - Progress tracking and monitoring
+  - Enhanced file matching logic
+  - Improved error handling
 - **Mock Kiwix Server**: Test infrastructure for integration testing
   - Directory listing
   - Content serving
   - Health checks
+  - Test file provisioning
 
 ### Recent Achievements
+- Fixed content state update mechanism
+- Improved file matching logic
+- Enhanced logging and error handling
 - All integration tests passing
-- Improved mock server configuration
-- Enhanced content manager reliability
-- Fixed async fixture handling
-- Implemented atomic state updates
-- Added comprehensive error handling
+- Verified concurrent download functionality
+- Confirmed atomic state updates
 
 ### Current Development Focus
 - Performance optimization
 - Monitoring enhancements
 - Content validation
 - Documentation improvements
+- Example configurations
 
 ## Quick Start
 
@@ -182,4 +185,20 @@ ApocaCache automates the process of downloading, managing, and serving Kiwix ZIM
 
 ## Security
 
-Please report security issues to [security contact]. 
+Please report security issues to [security contact].
+
+## Running Tests
+
+To run the complete test suite within Docker containers, follow these steps:
+
+1. Ensure Docker and docker-compose are installed on your system.
+2. Grant executable permission to the test script (if not already set):
+   chmod +x run_tests.sh
+3. Execute the test script:
+   ./run_tests.sh
+
+The run_tests.sh script will:
+- Build Docker images without using the cache.
+- Set the TESTING environment variable to "true" so that tests use the sample ZIM file from [https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim](https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim).
+- Run the test suite using the docker-compose configuration from library-maintainer/tests/docker-compose.test.yaml.
+- Automatically shut down the Docker containers upon completion. 
