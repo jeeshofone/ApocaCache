@@ -5,6 +5,19 @@ This project is currently under active development. Features may be incomplete o
 
 A distributed caching system for Kiwix ZIM files.
 
+## About the Name
+
+ApocaCache (Apocalypse + Cache) is designed with disaster preparedness in mind. In a world where internet connectivity cannot be taken for granted, whether due to natural disasters, infrastructure failures, or other catastrophic events, having access to human knowledge becomes crucial.
+
+This project enables you to:
+- Maintain an offline copy of Wikipedia and other educational resources
+- Automatically sync and update content when connectivity is available
+- Run on any hardware, from a Raspberry Pi to a data center
+- Serve content reliably even in disconnected environments
+- Deploy in containerized environments for easy maintenance and portability
+
+Think of it as your "knowledge bunker" - always ready, always accessible, regardless of what happens to the broader internet infrastructure.
+
 ## Project Status (2025-02-02)
 All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic, content state management, and proper permission handling.
 
