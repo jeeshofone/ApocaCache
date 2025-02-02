@@ -98,62 +98,79 @@ class ContentManager:
                         raise Exception(f"Failed to fetch content list: {response.status}")
                     
                     html = await response.text()
-                    soup = BeautifulSoup(html, 'lxml')
+                    soup = BeautifulSoup(html, 'html.parser')  # Use html.parser instead of lxml
                     
-                    # Find the pre element containing the file list
-                    pre = soup.find('pre')
-                    if not pre:
-                        log.error("content_list.parse_failed", error="No pre element found in directory listing")
+                    # Find all links in the directory listing
+                    links = soup.find_all('a')
+                    if not links:
+                        log.error("content_list.parse_failed", error="No links found in directory listing")
                         return []
                     
-                    # Process each line
-                    for line in pre.get_text().split('\n'):
-                        if not line.strip() or line.startswith('../'):
+                    # Process each link
+                    for link in links:
+                        href = link.get('href')
+                        if not href or href == '../':
+                            continue
+                        
+                        # Get the text after the link which contains size and date
+                        text = link.next_sibling
+                        if not text:
                             continue
                             
-                        # Try mock server format first (filename size date)
-                        match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
-                        if not match:
-                            # Try production format
-                            match = re.match(r'(.+?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+(\d+)', line.strip())
-                            if match:
-                                filename = match.group(1).strip()
-                                size = int(match.group(3))
-                                date_str = match.group(2)
-                            else:
-                                continue
-                        else:
-                            filename = match.group(1).strip()
-                            size = int(match.group(2))
-                            date_str = match.group(3)
+                        text = text.strip()
+                        if not text:
+                            continue
                         
-                        if filename.endswith('.zim'):
-                            full_path = os.path.join(path, filename) if path else filename
-                            # Check if file matches content pattern and language filter
-                            matches_pattern = self._matches_content_pattern(filename)
-                            matches_language = self._matches_language_filter(filename)
+                        # Parse the text for size and date
+                        parts = text.split()
+                        if len(parts) < 3:
+                            continue
                             
-                            if matches_pattern and matches_language:
-                                content_list.append((full_path, date_str, size))
-                                log.info("content_list.added_file", 
-                                       filename=full_path,
-                                       size=size,
-                                       date=date_str)
+                        try:
+                            # Try to parse date and size
+                            date_str = f"{parts[0]} {parts[1]}"
+                            size_str = parts[2]
+                            
+                            # Convert size to bytes
+                            if size_str == '-':
+                                size = 0
                             else:
-                                log.debug("content_list.filtered_file", 
-                                        filename=full_path,
-                                        matches_pattern=matches_pattern,
-                                        matches_language=matches_language)
-                        elif filename.endswith('/') and self.config.scan_subdirs:
-                            # This is a directory, scan it recursively if scan_subdirs is enabled
-                            subdir_name = filename.rstrip('/')
-                            subdir_url = f"{url.rstrip('/')}/{subdir_name}"
-                            subdir_path = os.path.join(path, subdir_name) if path else subdir_name
-                            subdir_content = await scan_directory(subdir_url, subdir_path)
-                            content_list.extend(subdir_content)
-                            log.info("content_list.scanned_subdir", 
-                                   subdir=subdir_path,
-                                   files_found=len(subdir_content))
+                                size = int(size_str)
+                            
+                            filename = href.rstrip('/')
+                            
+                            if filename.endswith('.zim'):
+                                full_path = os.path.join(path, filename) if path else filename
+                                # Check if file matches content pattern and language filter
+                                matches_pattern = self._matches_content_pattern(filename)
+                                matches_language = self._matches_language_filter(filename)
+                                
+                                if matches_pattern and matches_language:
+                                    content_list.append((full_path, date_str, size))
+                                    log.info("content_list.added_file", 
+                                           filename=full_path,
+                                           size=size,
+                                           date=date_str)
+                                else:
+                                    log.debug("content_list.filtered_file", 
+                                            filename=full_path,
+                                            matches_pattern=matches_pattern,
+                                            matches_language=matches_language)
+                            elif href.endswith('/') and self.config.scan_subdirs:
+                                # This is a directory, scan it recursively if scan_subdirs is enabled
+                                subdir_name = filename
+                                subdir_url = f"{url.rstrip('/')}/{subdir_name}"
+                                subdir_path = os.path.join(path, subdir_name) if path else subdir_name
+                                subdir_content = await scan_directory(subdir_url, subdir_path)
+                                content_list.extend(subdir_content)
+                                log.info("content_list.scanned_subdir", 
+                                       subdir=subdir_path,
+                                       files_found=len(subdir_content))
+                        except Exception as e:
+                            log.debug("content_list.parse_error", 
+                                    text=text,
+                                    error=str(e))
+                            continue
                     
                     return content_list
         
