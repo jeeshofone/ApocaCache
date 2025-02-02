@@ -8,6 +8,7 @@ import os
 import time
 import json
 from datetime import datetime
+import re
 from typing import Dict, List, Optional, Tuple
 import aiohttp
 import aiofiles
@@ -25,7 +26,7 @@ class ContentManager:
     def __init__(self, config: Config):
         """Initialize the content manager."""
         self.config = config
-        self.base_url = config.base_url
+        self.base_url = config.base_url.rstrip('/')
         self.download_semaphore = asyncio.Semaphore(
             config.options.max_concurrent_downloads
         )
@@ -62,16 +63,23 @@ class ContentManager:
                 soup = BeautifulSoup(html, 'lxml')
                 content_list = []
                 
-                for link in soup.find_all('a'):
-                    href = link.get('href')
-                    if href and href.endswith('.zim'):
-                        size = link.next_sibling.strip('()')
-                        date_str = link.next_sibling.next_sibling.strip('[]')
-                        try:
-                            date = datetime.strptime(date_str, '%Y-%m-%d %H:%M')
-                            content_list.append((href, date_str, int(size)))
-                        except ValueError:
-                            continue
+                # Find the pre element containing the file list
+                pre = soup.find('pre')
+                if not pre:
+                    log.error("content_list.parse_failed", error="No pre element found in directory listing")
+                    return []
+                
+                # Process each line
+                for line in pre.get_text().split('\n'):
+                    if line.strip() and not line.startswith('../'):
+                        # Parse line using regex
+                        match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
+                        if match:
+                            filename = match.group(1).strip()
+                            if filename.endswith('.zim'):
+                                size = int(match.group(2))
+                                date_str = match.group(3)
+                                content_list.append((filename, date_str, size))
                 
                 return content_list
     
@@ -82,7 +90,8 @@ class ContentManager:
         async with self.download_semaphore:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.base_url}{url}") as response:
+                    download_url = f"{self.base_url}/{url}"
+                    async with session.get(download_url) as response:
                         if response.status != 200:
                             raise Exception(f"Download failed: {response.status}")
                         
@@ -133,7 +142,7 @@ class ContentManager:
                 
                 # Find matching content
                 for filename, date_str, size in available_content:
-                    if filename.startswith(f"{content_item.category}/{content_item.name}"):
+                    if filename.startswith(f"{content_item.name}.zim"):
                         dest_path = os.path.join(
                             self.config.data_dir,
                             filename
@@ -144,6 +153,13 @@ class ContentManager:
                         if (not os.path.exists(dest_path) or
                             state.get('last_updated') != date_str):
                             
+                            # Update state before download
+                            self.content_state[content_item.name] = {
+                                'last_updated': date_str,
+                                'size': size,
+                                'path': dest_path
+                            }
+                            
                             download_tasks.append(
                                 self._download_file(
                                     filename,
@@ -151,13 +167,6 @@ class ContentManager:
                                     content_item
                                 )
                             )
-                            
-                            # Update state
-                            self.content_state[content_item.name] = {
-                                'last_updated': date_str,
-                                'size': size,
-                                'path': dest_path
-                            }
             
             if download_tasks:
                 results = await asyncio.gather(*download_tasks)
