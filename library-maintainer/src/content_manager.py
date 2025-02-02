@@ -32,6 +32,14 @@ class ContentManager:
         )
         self.content_state: Dict[str, Dict] = {}
         self._load_state()
+        
+        # Log initial configuration
+        log.info("content_manager.initialized",
+                base_url=self.base_url,
+                language_filter=self.config.language_filter,
+                content_pattern=self.config.content_pattern,
+                scan_subdirs=self.config.scan_subdirs,
+                download_all=self.config.download_all)
     
     def _load_state(self):
         """Load content state from state file."""
@@ -40,6 +48,7 @@ class ContentManager:
             try:
                 with open(state_file, 'r') as f:
                     self.content_state = json.loads(f.read())
+                log.info("content_state.loaded", items=len(self.content_state))
             except Exception as e:
                 log.error("content_state.load_failed", error=str(e))
     
@@ -49,6 +58,7 @@ class ContentManager:
         try:
             async with aiofiles.open(state_file, 'w') as f:
                 await f.write(json.dumps(self.content_state, indent=2))
+            log.info("content_state.saved", items=len(self.content_state))
         except Exception as e:
             log.error("content_state.save_failed", error=str(e))
     
@@ -57,7 +67,12 @@ class ContentManager:
         if not self.config.content_pattern:
             return True
         patterns = self.config.content_pattern.split('|')
-        return any(re.search(pattern, filename) for pattern in patterns)
+        for pattern in patterns:
+            if re.search(pattern, filename):
+                log.debug("content_pattern.matched", filename=filename, pattern=pattern)
+                return True
+        log.debug("content_pattern.no_match", filename=filename, patterns=patterns)
+        return False
     
     def _matches_language_filter(self, filename: str) -> bool:
         """Check if filename matches language filter."""
@@ -65,7 +80,9 @@ class ContentManager:
             return True
         for lang in self.config.language_filter:
             if f"_{lang}_" in filename or f"_{lang}." in filename:
+                log.debug("language_filter.matched", filename=filename, language=lang)
                 return True
+        log.debug("language_filter.no_match", filename=filename, languages=self.config.language_filter)
         return False
     
     async def _get_available_content(self) -> List[Tuple[str, str, int]]:
@@ -73,6 +90,8 @@ class ContentManager:
         async def scan_directory(url: str, path: str = "") -> List[Tuple[str, str, int]]:
             """Recursively scan a directory for content."""
             content_list = []
+            log.info("directory.scanning", url=url, path=path)
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
@@ -89,7 +108,7 @@ class ContentManager:
                     
                     # Process each line
                     for line in pre.get_text().split('\n'):
-                        log.info("content_list.parsing_line", line=line)
+                        log.debug("content_list.parsing_line", line=line)
                         if line.strip() and not line.startswith('../'):
                             # Try mock server format first (filename size date)
                             match = re.match(r'(.+?)\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line.strip())
@@ -100,27 +119,33 @@ class ContentManager:
                                     filename = match.group(1).strip()
                                     size = int(match.group(3))
                                     date_str = match.group(2)
-                                    log.info("content_list.matched_production", filename=filename, size=size, date=date_str)
+                                    log.debug("content_list.matched_production", filename=filename, size=size, date=date_str)
                                 else:
-                                    log.info("content_list.no_match", line=line)
+                                    log.debug("content_list.no_match", line=line)
                                     continue
                             else:
                                 filename = match.group(1).strip()
                                 size = int(match.group(2))
                                 date_str = match.group(3)
-                                log.info("content_list.matched_mock", filename=filename, size=size, date=date_str)
+                                log.debug("content_list.matched_mock", filename=filename, size=size, date=date_str)
                             
                             if filename.endswith('.zim'):
                                 full_path = os.path.join(path, filename) if path else filename
                                 # Check if file matches content pattern and language filter
-                                if self._matches_content_pattern(filename) and self._matches_language_filter(filename):
+                                matches_pattern = self._matches_content_pattern(filename)
+                                matches_language = self._matches_language_filter(filename)
+                                
+                                if matches_pattern and matches_language:
                                     content_list.append((full_path, date_str, size))
-                                    log.info("content_list.added", filename=full_path)
+                                    log.info("content_list.added_file", 
+                                           filename=full_path,
+                                           size=size,
+                                           date=date_str)
                                 else:
-                                    log.debug("content_list.filtered", 
-                                            filename=full_path, 
-                                            matches_pattern=self._matches_content_pattern(filename),
-                                            matches_language=self._matches_language_filter(filename))
+                                    log.debug("content_list.filtered_file", 
+                                            filename=full_path,
+                                            matches_pattern=matches_pattern,
+                                            matches_language=matches_language)
                             elif filename.endswith('/') and self.config.scan_subdirs:
                                 # This is a directory, scan it recursively if scan_subdirs is enabled
                                 subdir_name = filename.rstrip('/')
@@ -128,12 +153,16 @@ class ContentManager:
                                 subdir_path = os.path.join(path, subdir_name) if path else subdir_name
                                 subdir_content = await scan_directory(subdir_url, subdir_path)
                                 content_list.extend(subdir_content)
-                                log.info("content_list.scanned_subdir", subdir=subdir_path)
+                                log.info("content_list.scanned_subdir", 
+                                       subdir=subdir_path,
+                                       files_found=len(subdir_content))
                     
                     return content_list
         
         content_list = await scan_directory(self.base_url)
-        log.info("content_list.complete", count=len(content_list), items=content_list)
+        log.info("content_list.complete", 
+                count=len(content_list), 
+                items=[item[0] for item in content_list])
         return content_list
     
     async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
