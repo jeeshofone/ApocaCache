@@ -1,6 +1,42 @@
-# Project Todo List
+# ApocaCache Todo List
 
 Last Updated: $(date '+%Y-%m-%d %H:%M:%S')
+
+## Current Tasks
+- [x] Initial project setup
+- [x] Basic docker-compose configuration
+- [x] Configure English content filtering
+- [ ] Test content downloading from all directories
+- [ ] Verify content synchronization
+- [ ] Monitor memory usage and performance
+- [ ] Test kiwix-serve functionality
+- [ ] Document content organization structure
+
+## Completed Tasks
+- [x] Updated docker-compose-english-all.yaml with improved configuration
+- [x] Added memory limits and resource constraints
+- [x] Configured content pattern matching for English content
+- [x] Enabled subdirectory scanning
+- [x] Increased download timeout for large files
+
+## Next Steps
+1. Monitor initial content download
+2. Verify content organization
+3. Test search functionality
+4. Document content structure
+5. Create backup strategy
+
+## Known Issues
+- Need to verify memory limits are sufficient for large content sets
+- Need to test concurrent download performance
+- Need to verify content pattern matching across all directories
+
+## Future Improvements
+- Add content validation
+- Implement download resume capability
+- Add progress monitoring
+- Create content update notifications
+- Implement content deduplication
 
 ## Completed
 - [x] Set up basic project structure
@@ -22,13 +58,6 @@ Last Updated: $(date '+%Y-%m-%d %H:%M:%S')
 - [ ] Add content validation features
 - [ ] Optimize download performance
 - [ ] Enhance error handling and logging
-
-## Next Steps
-1. Add more example configurations
-2. Implement monitoring system
-3. Add content validation
-4. Create deployment guides
-5. Add performance optimization features
 
 ## Future Enhancements
 - Content deduplication

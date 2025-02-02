@@ -1,6 +1,31 @@
 # ApocaCache User Prompts History
 
 ## $(date '+%Y-%m-%d %H:%M:%S')
+### Initial Setup Request
+User requested to properly follow files inside all directories and setup the docker-compose-english-all example to not filter anything except English content. Key points:
+- Analyze directory structure for all content types
+- Modify docker-compose configuration for English content
+- Setup proper resource limits
+- Enable subdirectory scanning
+- Configure content pattern matching
+
+### Changes Made
+1. Updated docker-compose-english-all.yaml:
+   - Added CONTENT_PATTERN for English content matching
+   - Enabled subdirectory scanning
+   - Configured memory limits
+   - Increased download timeout
+   - Added verbose logging
+2. Created todo.md for project tracking
+3. Created userprompts.md for request history
+
+### Next Steps
+- Monitor content download progress
+- Verify English content filtering
+- Test kiwix-serve functionality
+- Document content organization
+
+## $(date '+%Y-%m-%d %H:%M:%S')
 ### Initial Project Setup Request
 Received comprehensive project requirements for ApocaCache, including:
 - Project overview and repository structure

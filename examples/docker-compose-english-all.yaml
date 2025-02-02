@@ -13,6 +13,10 @@ services:
       - MAX_CONCURRENT_DOWNLOADS=3
       - VERIFY_DOWNLOADS=true
       - LOG_LEVEL=INFO
+      - CONTENT_PATTERN=.*_en.*|.*english.*  # Match any content with 'en' or 'english' in the name
+      - SCAN_SUBDIRS=true  # Scan all subdirectories
+      - MEMORY_LIMIT=4G  # Increase memory limit for larger datasets
+      - DOWNLOAD_TIMEOUT=3600  # Increase download timeout to 1 hour
     volumes:
       - ./kiwix:/data:rw
     user: "1000:1000"
@@ -25,6 +29,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
 
   kiwix-serve:
     image: ghcr.io/kiwix/kiwix-serve:latest
@@ -33,7 +43,7 @@ services:
     volumes:
       - ./kiwix:/data:ro
     user: "1000:1000"
-    command: --library /data/library.xml
+    command: --library /data/library.xml --verbose
     depends_on:
       library-maintainer:
         condition: service_healthy
@@ -45,6 +55,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
 volumes:
   kiwix_data:
