@@ -5,8 +5,11 @@ services:
     build:
       context: ../library-maintainer
       dockerfile: Dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
     environment:
-      - LANGUAGE_FILTER=eng
+      - LANGUAGE_FILTER=en
       - DOWNLOAD_ALL=true
       - UPDATE_SCHEDULE=0 2 * * *  # Run at 2 AM daily
       - MAX_CONCURRENT_DOWNLOADS=3
@@ -14,6 +17,8 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - kiwix_data:/data
+      - ./kiwix:/data:rw
+    user: "${UID:-1000}:${GID:-1000}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import os; os.access('/data/library.xml', os.R_OK) or exit(1)"]
@@ -28,6 +33,8 @@ services:
       - "8080:8080"
     volumes:
       - kiwix_data:/data:ro
+      - ./kiwix:/data:ro
+    user: "${UID:-1000}:${GID:-1000}"
     command: --library /data/library.xml
     depends_on:
       library-maintainer:

@@ -5,13 +5,18 @@ services:
     build:
       context: ./library-maintainer
       dockerfile: Dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
     volumes:
       - kiwix_data:/data
       - ./examples/download-list.yaml:/config/download-list.yaml:ro
+      - ./examples/kiwix:/data:rw
     environment:
       - LANGUAGE_FILTER=${LANGUAGE_FILTER:-}
       - UPDATE_SCHEDULE=${UPDATE_SCHEDULE:-0 2 1 * *}
       - DOWNLOAD_ALL=${DOWNLOAD_ALL:-false}
+    user: "${UID:-1000}:${GID:-1000}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import os; os.access('/data/library.xml', os.R_OK) or exit(1)"]
@@ -23,8 +28,10 @@ services:
     image: ghcr.io/kiwix/kiwix-serve:latest
     volumes:
       - kiwix_data:/data:ro
+      - ./examples/kiwix:/data:ro
     ports:
       - "8080:8080"
+    user: "${UID:-1000}:${GID:-1000}"
     command: --library /data/library.xml
     depends_on:
       library-maintainer:

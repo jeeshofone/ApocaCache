@@ -2,8 +2,8 @@
 
 A distributed caching system for Kiwix ZIM files.
 
-## Project Status ($(date '+%Y-%m-%d %H:%M'))
-All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic and content state management.
+## Project Status (2025-02-02)
+All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic, content state management, and proper permission handling.
 
 ### Components
 - **Library Maintainer**: Manages ZIM file downloads and library.xml generation
@@ -12,6 +12,7 @@ All integration tests are now passing with improved stability. The library maint
   - Progress tracking and monitoring
   - Enhanced file matching logic
   - Improved error handling
+  - Proper permission handling with configurable UID/GID
 - **Mock Kiwix Server**: Test infrastructure for integration testing
   - Directory listing
   - Content serving
@@ -25,6 +26,7 @@ All integration tests are now passing with improved stability. The library maint
 - All integration tests passing
 - Verified concurrent download functionality
 - Confirmed atomic state updates
+- Added proper permission handling with configurable UID/GID
 
 ### Current Development Focus
 - Performance optimization
@@ -41,11 +43,13 @@ All integration tests are now passing with improved stability. The library maint
 git clone https://github.com/jeeshofone/ApocaCache.git
 cd ApocaCache
 
-# Create data directory
-sudo mkdir -p /kiwix
-sudo chown -R 1000:1000 /kiwix
+# Set up the kiwix directory with proper permissions
+chmod +x setup_kiwix_dir.sh
+./setup_kiwix_dir.sh
 
-# Build and start the services
+# Build and start the services (this will use your current user's UID/GID)
+export UID=$(id -u)
+export GID=$(id -g)
 docker-compose build
 docker-compose up -d
 ```
@@ -53,47 +57,26 @@ docker-compose up -d
 ### Example Configurations
 
 #### Download All English Content
-Create a `docker-compose.yaml` file:
+Use the provided example in `examples/docker-compose-english-all.yaml`:
 
-```yaml
-version: '3.8'
+```bash
+# Set up permissions
+chmod +x setup_kiwix_dir.sh
+./setup_kiwix_dir.sh
 
-services:
-  library-maintainer:
-    build:
-      context: ../library-maintainer
-      dockerfile: Dockerfile
-    environment:
-      - LANGUAGE_FILTER=eng
-      - DOWNLOAD_ALL=true
-      - UPDATE_SCHEDULE=0 2 * * *  # Run at 2 AM daily
-    volumes:
-      - /kiwix:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  kiwix-serve:
-    image: ghcr.io/kiwix/kiwix-serve:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - /kiwix:/data:ro
-    depends_on:
-      library-maintainer:
-        condition: service_healthy
-    command: --library /data/library.xml
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/catalog"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+# Build and run with your user's UID/GID
+export UID=$(id -u)
+export GID=$(id -g)
+docker-compose -f examples/docker-compose-english-all.yaml build
+docker-compose -f examples/docker-compose-english-all.yaml up -d
 ```
+
+The English-all configuration includes:
+- Language filter set to 'en' (ISO 639-1 code)
+- Automatic daily updates at 2 AM
+- Concurrent download management
+- Download verification
+- Proper permission handling using host UID/GID
 
 More example configurations can be found in the `examples/` directory.
 
@@ -101,10 +84,12 @@ More example configurations can be found in the `examples/` directory.
 
 ### Environment Variables
 
-- `LANGUAGE_FILTER`: Filter content by language codes (e.g., "eng,spa")
+- `LANGUAGE_FILTER`: Filter content by language codes (e.g., "en,es" using ISO 639-1 codes)
 - `UPDATE_SCHEDULE`: Cron expression for update schedule (default: "0 2 1 * *")
 - `DOWNLOAD_ALL`: Boolean flag to download all available content (default: false)
 - `KIWIX_SERVER_URL`: URL for the Kiwix server (default: "http://kiwix-serve")
+- `UID`: User ID for container processes (defaults to current user's UID)
+- `GID`: Group ID for container processes (defaults to current user's GID)
 
 ### Custom Download List
 
@@ -113,10 +98,10 @@ Create a `download-list.yaml` file:
 ```yaml
 content:
   - name: "wikipedia_en"
-    language: "eng"
+    language: "en"
     category: "wikipedia"
   - name: "wiktionary_es"
-    language: "spa"
+    language: "es"
     category: "wiktionary"
 ```
 

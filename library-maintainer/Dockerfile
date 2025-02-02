@@ -9,6 +9,10 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements
 # Runtime stage
 FROM python:3.11-slim
 
+# Build arguments for UID/GID
+ARG UID=1000
+ARG GID=1000
+
 # Install curl for healthcheck
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
@@ -36,9 +40,11 @@ ENV PYTHONUNBUFFERED=1 \
     UPDATE_SCHEDULE="0 2 1 * *" \
     DOWNLOAD_ALL="false"
 
-# Run as non-root user
-RUN useradd -m -r -u 1000 kiwix && \
+# Create group and user with specified UID/GID
+RUN groupadd -g $GID kiwix && \
+    useradd -u $UID -g $GID -m -r kiwix && \
     chown -R kiwix:kiwix /app /data /config
+
 USER kiwix
 
 VOLUME ["/data", "/config"]
