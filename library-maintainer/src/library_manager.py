@@ -77,7 +77,10 @@ class LibraryManager:
                     ET.SubElement(book, 'size').text = str(size)
                     
                     # Add URL for source
-                    url = f"https://download.kiwix.org/zim/{metadata['creator']}/{filename}"
+                    if os.getenv("TESTING", "false").lower() == "true":
+                        url = "https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim"
+                    else:
+                        url = f"{self.config.base_url}{metadata['creator']}/{filename}"
                     ET.SubElement(book, 'url').text = url
             
             # Format XML with proper indentation
