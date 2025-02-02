@@ -1,0 +1,26 @@
+content:
+  - name: wikipedia_en_all
+    language: en
+    category: wikipedia
+    description: "English Wikipedia"
+  
+  - name: wiktionary_en_all
+    language: en
+    category: wiktionary
+    description: "English Wiktionary"
+  
+  - name: wikivoyage_en_all
+    language: en
+    category: wikivoyage
+    description: "English Wikivoyage"
+  
+  - name: wikibooks_en_all
+    language: en
+    category: wikibooks
+    description: "English Wikibooks"
+
+options:
+  max_concurrent_downloads: 3
+  retry_attempts: 3
+  verify_downloads: true
+  cleanup_incomplete: true 

@@ -224,14 +224,12 @@ class ContentManager:
             available_content = await self._get_available_content()
             download_tasks = []
             
-            log.debug("content_update.filtering", 
-                     content_count=len(available_content),
-                     language_filter=self.config.language_filter,
-                     content_pattern=self.config.content_pattern,
-                     download_all=self.config.download_all)
+            log.info("content_update.download_list", 
+                     content_items=[(item.name, item.language, item.category) 
+                                  for item in self.config.content_list])
             
             for content_item in self.config.content_list:
-                log.debug("content_update.checking_item", 
+                log.info("content_update.checking_item", 
                          content_name=content_item.name,
                          content_language=content_item.language,
                          content_category=content_item.category)
@@ -273,20 +271,39 @@ class ContentManager:
                         self.content_state[content_item.name] = state
                         
                         # Check if download/update needed
-                        if self.config.should_download_content(content_item) and \
-                           (not os.path.exists(dest_path) or \
-                           self.content_state.get(content_item.name, {}).get('last_updated') != date_str):
-                            download_task = self._download_file(
-                                filepath,  # Use the full path from the server
-                                dest_path,
-                                content_item
-                            )
-                            download_tasks.append(download_task)
+                        if self.config.should_download_content(content_item):
+                            needs_download = not os.path.exists(dest_path)
+                            needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != date_str
+                            
+                            log.info("content_update.download_check",
+                                    content_name=content_item.name,
+                                    needs_download=needs_download,
+                                    needs_update=needs_update,
+                                    current_date=self.content_state.get(content_item.name, {}).get('last_updated'),
+                                    new_date=date_str)
+                            
+                            if needs_download or needs_update:
+                                log.info("content_update.queueing_download",
+                                        content_name=content_item.name,
+                                        filename=filename,
+                                        size=size)
+                                download_task = self._download_file(
+                                    filepath,  # Use the full path from the server
+                                    dest_path,
+                                    content_item
+                                )
+                                download_tasks.append(download_task)
                         break  # Found matching file, no need to check more
             
             if download_tasks:
+                log.info("content_update.starting_downloads", count=len(download_tasks))
                 results = await asyncio.gather(*download_tasks)
-                
+                log.info("content_update.downloads_complete", 
+                         successful=sum(1 for r in results if r),
+                         failed=sum(1 for r in results if not r))
+            else:
+                log.info("content_update.no_downloads_needed")
+            
             # Always save state after updates
             await self._save_state()
             
