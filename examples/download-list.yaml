@@ -2,23 +2,35 @@
 # This file specifies which Kiwix content should be downloaded and maintained
 
 content:
-  # English Wikipedia Sample
+  # Wikipedia Sample
   - name: "wikipedia_en_all_mini"
-    language: "eng"
+    language: "en"
     category: "wikipedia"
     description: "Wikipedia Mini in English"
     
-  # Spanish Wiktionary Sample
-  - name: "wiktionary_es_all"
-    language: "spa"
-    category: "wiktionary"
-    description: "Complete Wiktionary in Spanish"
+  # Developer Documentation
+  - name: "devdocs_en_all"
+    language: "en"
+    category: "devdocs"
+    description: "Developer Documentation"
     
-  # Medical Information Sample
-  - name: "wikipedia_en_medicine"
-    language: "eng"
-    category: "wikipedia"
-    description: "Medical Wikipedia Articles"
+  # TED Talks
+  - name: "ted_en_all"
+    language: "en"
+    category: "ted"
+    description: "TED Talks in English"
+    
+  # Stack Exchange
+  - name: "stack_exchange_en_all"
+    language: "en"
+    category: "stack_exchange"
+    description: "Stack Exchange Q&A"
+
+  # Project Gutenberg
+  - name: "gutenberg_en_all"
+    language: "en" 
+    category: "gutenberg"
+    description: "Project Gutenberg English Books"
 
 # Configuration Options
 options:

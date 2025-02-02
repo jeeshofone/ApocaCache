@@ -32,7 +32,9 @@ class Config:
         self.data_dir = "/data"
         self.config_dir = "/config"
         self.library_file = os.path.join(self.data_dir, "library.xml")
-        self.base_url = "https://download.kiwix.org/zim/"  # Force pulling ZIM files only from external source
+        
+        # Always use the official Kiwix download server
+        self.base_url = "https://download.kiwix.org/zim/"
         
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")
@@ -76,7 +78,7 @@ class Config:
             self.options = ContentOptions(**config["options"])
     
     def should_download_content(self, content: ContentItem) -> bool:
-        """Determine if content should be downloaded based on filters."""
+        """Check if content should be downloaded based on filters."""
         if self.download_all:
             return True
         
