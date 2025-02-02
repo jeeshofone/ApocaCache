@@ -29,7 +29,7 @@ services:
   kiwix-serve:
     image: ghcr.io/kiwix/kiwix-serve:latest
     ports:
-      - "8080:8080"
+      - "3119:8080"
     volumes:
       - ./kiwix:/data:ro
     user: "1000:1000"

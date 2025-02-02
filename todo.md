@@ -39,6 +39,12 @@ Last Updated: $(date '+%Y-%m-%d %H:%M:%S')
 
 ## Recent Updates
 
+2025-02-02: Updated Kiwix server port configuration to use port 3119 instead of 8080 to avoid conflicts with other services.
+Key changes:
+- Modified docker-compose-english-all.yaml to use port 3119
+- Updated documentation to reflect new port
+- Verified service accessibility on new port
+
 2025-02-02: Fixed content state update and file matching logic in content manager. All integration tests now passing successfully.
 Key improvements:
 - Fixed file matching logic to properly handle exact matches

@@ -93,6 +93,7 @@ The English-all configuration includes:
 - Concurrent download management
 - Download verification
 - Proper permission handling using host UID/GID
+- Kiwix web interface accessible at http://localhost:3119
 
 More example configurations can be found in the `examples/` directory.
 

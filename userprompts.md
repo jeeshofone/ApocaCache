@@ -86,5 +86,6 @@ Created detailed documentation for the library maintainer component, including:
 - Future improvements
 
 ### User Queries
+2025-02-02: User requested to change Kiwix server port from 8080 to 3119 to avoid port conflicts
 2025-02-02: User requested to fix content state update issue in test_update_content
 2023-10-27: User asked 'what does the kiwix-serve do?' 
