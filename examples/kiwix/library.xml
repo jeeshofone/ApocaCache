@@ -4,8 +4,14 @@ Default library file for first-run usage.
 This file provides a default entry to download the Wikipedia (English, no pics) zim file from the official Kiwix server.
 After the zim is downloaded locally, the library maintainer will update the library.xml accordingly.
 -->
-<library>
-  <zim name="wikipedia" title="Wikipedia (English) - No Pics" 
-       description="Offline copy of Wikipedia (English, images excluded)"
-       url="https://download.kiwix.org/zim/wikipedia_en_all_nopic_2021-01.zim" />
+<library version="20110515">
+  <book id="wikipedia_en_all_mini" path="wikipedia/wikipedia_en_all_mini.zim" url="https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini.zim" title="Wikipedia Mini in English" description="A compact version of English Wikipedia" language="eng" creator="Wikipedia" publisher="Kiwix" name="wikipedia_en_all_mini"/>
+  
+  <book id="devdocs_en_all" path="devdocs/devdocs_en_all.zim" url="https://download.kiwix.org/zim/devdocs/devdocs_en_all.zim" title="Developer Documentation" description="Comprehensive developer documentation" language="eng" creator="DevDocs" publisher="Kiwix" name="devdocs_en_all"/>
+  
+  <book id="ted_en_all" path="ted/ted_en_all.zim" url="https://download.kiwix.org/zim/ted/ted_en_all.zim" title="TED Talks in English" description="TED Talks video collection" language="eng" creator="TED" publisher="Kiwix" name="ted_en_all"/>
+  
+  <book id="stack_exchange_en_all" path="stack_exchange/stack_exchange_en_all.zim" url="https://download.kiwix.org/zim/stack_exchange/stack_exchange_en_all.zim" title="Stack Exchange Q&A" description="Stack Exchange knowledge base" language="eng" creator="Stack Exchange" publisher="Kiwix" name="stack_exchange_en_all"/>
+  
+  <book id="gutenberg_en_all" path="gutenberg/gutenberg_en_all.zim" url="https://download.kiwix.org/zim/gutenberg/gutenberg_en_all.zim" title="Project Gutenberg English Books" description="Free eBooks from Project Gutenberg" language="eng" creator="Project Gutenberg" publisher="Kiwix" name="gutenberg_en_all"/>
 </library>

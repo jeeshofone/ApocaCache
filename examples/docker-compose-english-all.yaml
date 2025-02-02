@@ -1,13 +1,11 @@
-version: '3.8'
-
 services:
   library-maintainer:
     build:
       context: ../library-maintainer
       dockerfile: Dockerfile
       args:
-        - UID=${UID:-1000}
-        - GID=${GID:-1000}
+        - UID=1000
+        - GID=1000
     environment:
       - LANGUAGE_FILTER=en
       - DOWNLOAD_ALL=true
@@ -17,7 +15,7 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - ./kiwix:/data:rw
-    user: "${UID:-1000}:${GID:-1000}"
+    user: "1000:1000"
     restart: unless-stopped
     networks:
       - kiwix_network
@@ -34,7 +32,7 @@ services:
       - "8080:8080"
     volumes:
       - ./kiwix:/data:ro
-    user: "${UID:-1000}:${GID:-1000}"
+    user: "1000:1000"
     command: --library /data/library.xml
     depends_on:
       library-maintainer:
