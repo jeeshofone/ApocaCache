@@ -392,16 +392,16 @@ class ContentManager:
                     ) as session:
                         try:
                             async with session.get(download_url) as response:
-                            if response.status != 200:
-                                raise Exception(f"Download failed: {response.status}")
-                            
-                            total_size = int(response.headers.get('content-length', 0))
-                        if total_size == 0:
-                            log.warning("download.no_content_length",
-                                      content=content.name,
-                                      url=download_url)
-                        
-                        downloaded = 0
+                                if response.status != 200:
+                                    raise Exception(f"Download failed: {response.status}")
+                                
+                                total_size = int(response.headers.get('content-length', 0))
+                                if total_size == 0:
+                                    log.warning("download.no_content_length",
+                                              content=content.name,
+                                              url=download_url)
+                                
+                                downloaded = 0
                         
                         # Create parent directory if it doesn't exist
                         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
