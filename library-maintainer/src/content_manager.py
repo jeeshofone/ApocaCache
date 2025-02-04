@@ -188,23 +188,14 @@ class ContentManager:
     
     def _matches_content_pattern(self, filename: str) -> bool:
         """Check if filename matches content pattern."""
-        log.debug("content_pattern.checking", 
-                filename=filename, 
-                pattern=self.config.content_pattern)
-        
         if not self.config.content_pattern:
-            log.debug("content_pattern.no_pattern")
             return True
             
         patterns = self.config.content_pattern.split('|')
-        log.debug("content_pattern.patterns", patterns=patterns)
         
         for pattern in patterns:
             try:
                 if re.search(pattern, filename):
-                    log.debug("content_pattern.matched", 
-                            filename=filename, 
-                            pattern=pattern)
                     return True
             except re.error as e:
                 log.error("content_pattern.invalid", 
@@ -212,19 +203,11 @@ class ContentManager:
                          error=str(e))
                 continue
                 
-        log.debug("content_pattern.no_match", 
-                filename=filename, 
-                patterns=patterns)
         return False
     
     def _matches_language_filter(self, filename: str) -> bool:
         """Check if filename matches language filter."""
-        log.debug("language_filter.checking", 
-                filename=filename, 
-                languages=self.config.language_filter)
-        
         if not self.config.language_filter:
-            log.debug("language_filter.no_filter")
             return True
             
         for lang in self.config.language_filter:
@@ -241,20 +224,9 @@ class ContentManager:
             ]
             
             for pattern in patterns:
-                log.debug("language_filter.pattern", 
-                        language=lang, 
-                        pattern=pattern)
-                
                 if pattern in filename:
-                    log.debug("language_filter.matched", 
-                            filename=filename, 
-                            pattern=pattern,
-                            language=lang)
                     return True
                     
-        log.debug("language_filter.no_match", 
-                filename=filename, 
-                languages=self.config.language_filter)
         return False
     
     async def _get_available_content(self) -> List[ContentFile]:
