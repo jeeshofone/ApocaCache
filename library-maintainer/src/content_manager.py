@@ -594,14 +594,29 @@ class ContentManager:
                     # Check if download/update needed
                     if self.config.should_download_content(content_item):
                         needs_download = not os.path.exists(dest_path)
-                        needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != latest_version.date
+                        
+                        # Check both file size and date for updates
+                        current_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+                        size_mismatch = current_size != latest_version.size
+                        
+                        # Extract date from filename for comparison
+                        date_match = re.search(r'_(\d{4}-\d{2}).zim$', os.path.basename(dest_path)) if os.path.exists(dest_path) else None
+                        file_date = date_match.group(1) if date_match else None
+                        latest_date = re.search(r'_(\d{4}-\d{2}).zim$', latest_version.path).group(1)
+                        date_mismatch = file_date != latest_date if file_date else True
+                        
+                        needs_update = size_mismatch or date_mismatch
                         
                         log.info("content_update.download_check",
                                 content_name=content_item.name,
                                 needs_download=needs_download,
                                 needs_update=needs_update,
-                                current_date=self.content_state.get(content_item.name, {}).get('last_updated'),
-                                new_date=latest_version.date)
+                                current_size=current_size,
+                                new_size=latest_version.size,
+                                size_mismatch=size_mismatch,
+                                current_date=file_date,
+                                new_date=latest_date,
+                                date_mismatch=date_mismatch)
                         
                         if needs_download or needs_update:
                             log.info("content_update.queueing_download",
