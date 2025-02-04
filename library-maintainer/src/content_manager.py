@@ -284,10 +284,11 @@ class ContentManager:
             visited.add(url)
                 
             log.debug("directory.http_session.creating")
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout for directory listing
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 log.debug("directory.http_request.start", url=url)
                 try:
-                    async with session.get(url) as response:
+                    async with session.get(url, timeout=timeout) as response:
                         if response.status != 200:
                             log.error("directory.http_request.failed", status=response.status)
                             return []
@@ -419,7 +420,14 @@ class ContentManager:
                         url=download_url,
                         dest=dest_path)
                 
-                async with aiohttp.ClientSession() as session:
+                # Configure timeouts for large downloads
+                timeout = aiohttp.ClientTimeout(
+                    total=None,  # No total timeout
+                    connect=60,  # 60 seconds to establish connection
+                    sock_read=300  # 5 minutes to read data chunks
+                )
+                
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(download_url) as response:
                         if response.status != 200:
                             raise Exception(f"Download failed: {response.status}")
@@ -436,7 +444,7 @@ class ContentManager:
                         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
                         
                         async with aiofiles.open(temp_path, 'wb') as f:
-                            async for chunk in response.content.iter_chunked(8192):
+                            async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
                                 await f.write(chunk)
                                 downloaded += len(chunk)
                                 monitoring.update_content_size(
