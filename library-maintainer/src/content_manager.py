@@ -260,17 +260,32 @@ class ContentManager:
     async def _get_available_content(self) -> List[ContentFile]:
         """Get list of available content from server."""
         
-        async def scan_directory(url: str, path: str = "") -> List[ContentFile]:
+        async def scan_directory(url: str, path: str = "", depth: int = 0, visited: set = None) -> List[ContentFile]:
             """
             Scan a directory for content files.
             
             Args:
                 url: The base URL to scan
                 path: The relative path within the base URL
+                depth: Current recursion depth
+                visited: Set of visited URLs to prevent loops
                 
             Returns:
                 List of ContentFile objects found in the directory
             """
+            # Initialize visited set on first call
+            if visited is None:
+                visited = set()
+                
+            # Prevent infinite recursion
+            if depth > 3:  # Maximum directory depth
+                return []
+                
+            # Skip if we've already visited this URL
+            if url in visited:
+                return []
+            visited.add(url)
+                
             log.debug("directory.http_session.creating")
             async with aiohttp.ClientSession() as session:
                 log.debug("directory.http_request.start", url=url)
@@ -296,13 +311,23 @@ class ContentManager:
                             is_dir = href.endswith('/')
                             
                             if is_dir and self.config.scan_subdirs:
+                                # Skip certain directories that we know won't contain content
+                                if filename in ['archive', 'nightly', 'test', 'dev']:
+                                    continue
+                                    
                                 # Recursively scan subdirectory
                                 subdir_url = urljoin(url + '/', href)
                                 log.info("directory.subdir.scanning",
                                         subdir=filename,
-                                        url=subdir_url)
+                                        url=subdir_url,
+                                        depth=depth)
                                 try:
-                                    subdir_files = await scan_directory(subdir_url, full_path)
+                                    subdir_files = await scan_directory(
+                                        subdir_url, 
+                                        full_path,
+                                        depth + 1,
+                                        visited
+                                    )
                                     content_files.extend(subdir_files)
                                 except Exception as e:
                                     log.error("directory.subdir.scan_failed",
@@ -360,7 +385,7 @@ class ContentManager:
         
         try:
             log.info("content_list.scan.starting", base_url=self.base_url)
-            content_list = await scan_directory(self.base_url)
+            content_list = await scan_directory(self.base_url, depth=0)
             log.info("content_list.scan.complete", 
                     count=len(content_list), 
                     items=[item.name for item in content_list])
