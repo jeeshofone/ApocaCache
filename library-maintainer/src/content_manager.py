@@ -399,7 +399,7 @@ class ContentManager:
     
     async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
         """
-        Download a file with progress tracking and verification.
+        Download a file with progress tracking, verification and retries.
         
         Args:
             url: The URL to download from (can be relative or absolute)
@@ -410,15 +410,20 @@ class ContentManager:
             bool: True if download was successful, False otherwise
         """
         temp_path = f"{dest_path}.tmp"
+        max_retries = self.config.options.retry_attempts
+        retry_count = 0
         
         async with self.download_semaphore:
-            try:
-                # Ensure URL is absolute
-                download_url = url if url.startswith('http') else urljoin(self.base_url, url)
-                log.info("download.starting", 
-                        content=content.name,
-                        url=download_url,
-                        dest=dest_path)
+            while retry_count <= max_retries:
+                try:
+                    # Ensure URL is absolute
+                    download_url = url if url.startswith('http') else urljoin(self.base_url, url)
+                    log.info("download.starting", 
+                            content=content.name,
+                            url=download_url,
+                            dest=dest_path,
+                            attempt=retry_count + 1,
+                            max_attempts=max_retries + 1)
                 
                 # Configure timeouts for large downloads
                 timeout = aiohttp.ClientTimeout(
@@ -480,21 +485,45 @@ class ContentManager:
                 monitoring.record_download("success", content.language)
                 return True
                 
-            except Exception as e:
-                log.error("download.failed",
-                         content=content.name,
-                         error=str(e),
-                         traceback=traceback.format_exc())
-                monitoring.record_download("failed", content.language)
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        log.warning("download.retry",
+                                  content=content.name,
+                                  error=str(e),
+                                  attempt=retry_count,
+                                  max_attempts=max_retries + 1)
+                        # Clean up failed temp file before retry
+                        if os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except Exception as cleanup_error:
+                                log.error("download.cleanup_failed",
+                                        content=content.name,
+                                        error=str(cleanup_error))
+                        # Wait before retry with exponential backoff
+                        await asyncio.sleep(2 ** retry_count)
+                        continue
+                    
+                    # All retries exhausted
+                    log.error("download.failed",
+                             content=content.name,
+                             error=str(e),
+                             attempts=retry_count,
+                             traceback=traceback.format_exc())
+                    monitoring.record_download("failed", content.language)
+                    
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception as cleanup_error:
+                            log.error("download.cleanup_failed",
+                                    content=content.name,
+                                    error=str(cleanup_error))
+                    return False
                 
-                if os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except Exception as e:
-                        log.error("download.cleanup_failed",
-                                content=content.name,
-                                error=str(e))
-                return False
+                # If we get here, download was successful
+                return True
     
     async def update_content(self):
         """Update content based on configuration."""
