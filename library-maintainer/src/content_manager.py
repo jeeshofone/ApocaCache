@@ -424,9 +424,9 @@ class ContentManager:
                             dest=dest_path,
                             attempt=retry_count + 1,
                             max_attempts=max_retries + 1)
-                
-                # Configure timeouts for large downloads
-                timeout = aiohttp.ClientTimeout(
+                    
+                    # Configure timeouts for large downloads
+                    timeout = aiohttp.ClientTimeout(
                     total=None,  # No total timeout
                     connect=60,  # 60 seconds to establish connection
                     sock_read=300  # 5 minutes to read data chunks
@@ -482,9 +482,9 @@ class ContentManager:
                         content=content.name,
                         size=os.path.getsize(dest_path))
                         
-                monitoring.record_download("success", content.language)
-                return True
-                
+                    monitoring.record_download("success", content.language)
+                    return True
+                    
                 except Exception as e:
                     retry_count += 1
                     if retry_count <= max_retries:
