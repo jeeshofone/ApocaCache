@@ -470,9 +470,7 @@ class ContentManager:
                     # All retries exhausted
                     log.error("download.failed",
                              content=content.name,
-                             error=str(e),
-                             attempts=retry_count,
-                             traceback=traceback.format_exc())
+                             attempts=retry_count)
                     monitoring.record_download("failed", content.language)
                     
                     if os.path.exists(temp_path):
