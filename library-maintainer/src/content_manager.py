@@ -374,12 +374,24 @@ class ContentManager:
                     # Configure timeouts for large downloads
                     timeout = aiohttp.ClientTimeout(
                         total=None,  # No total timeout
-                        connect=60,  # 60 seconds to establish connection
-                        sock_read=300  # 5 minutes to read data chunks
+                        connect=120,  # 2 minutes to establish connection
+                        sock_read=600,  # 10 minutes to read data chunks
+                        sock_connect=60  # 1 minute for socket connection
                     )
                     
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
-                        async with session.get(download_url) as response:
+                    connector = aiohttp.TCPConnector(
+                        force_close=True,
+                        enable_cleanup_closed=True,
+                        limit=1  # Limit concurrent connections per session
+                    )
+                    
+                    async with aiohttp.ClientSession(
+                        timeout=timeout,
+                        connector=connector,
+                        raise_for_status=True
+                    ) as session:
+                        try:
+                            async with session.get(download_url) as response:
                             if response.status != 200:
                                 raise Exception(f"Download failed: {response.status}")
                             
@@ -432,11 +444,16 @@ class ContentManager:
                         return True
                     
                 except Exception as e:
+                    error_details = {
+                        'type': type(e).__name__,
+                        'message': str(e),
+                        'traceback': traceback.format_exc()
+                    }
                     retry_count += 1
                     if retry_count <= max_retries:
                         log.warning("download.retry",
                                   content=content.name,
-                                  error=str(e),
+                                  error=error_details,
                                   attempt=retry_count,
                                   max_attempts=max_retries + 1)
                         # Clean up failed temp file before retry
