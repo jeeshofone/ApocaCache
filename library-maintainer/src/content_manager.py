@@ -442,20 +442,19 @@ class ContentManager:
                                         
                                 monitoring.record_download("success", content.language)
                                 return True
-                    
-                except Exception as e:
-                    error_details = {
-                        'type': type(e).__name__,
-                        'message': str(e),
-                        'traceback': traceback.format_exc()
-                    }
-                    retry_count += 1
-                    if retry_count <= max_retries:
-                        log.warning("download.retry",
-                                  content=content.name,
-                                  error=error_details,
-                                  attempt=retry_count,
-                                  max_attempts=max_retries + 1)
+                        except Exception as e:
+                            error_details = {
+                                'type': type(e).__name__,
+                                'message': str(e),
+                                'traceback': traceback.format_exc()
+                            }
+                            retry_count += 1
+                            if retry_count <= max_retries:
+                                log.warning("download.retry",
+                                          content=content.name,
+                                          error=error_details,
+                                          attempt=retry_count,
+                                          max_attempts=max_retries + 1)
                         # Clean up failed temp file before retry
                         if os.path.exists(temp_path):
                             try:
