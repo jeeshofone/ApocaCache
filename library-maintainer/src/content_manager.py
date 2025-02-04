@@ -424,14 +424,14 @@ class ContentManager:
                                             progress=f"{progress:.1f}%",
                                             downloaded=downloaded,
                                             total=total_size)
-                
-                        if self.config.options.verify_downloads:
-                            # Verify download size if we know the expected size
-                            if total_size > 0 and os.path.getsize(temp_path) != total_size:
-                                raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
-                        
-                        # Create parent directory if it doesn't exist
-                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                                
+                                if self.config.options.verify_downloads:
+                                    # Verify download size if we know the expected size
+                                    if total_size > 0 and os.path.getsize(temp_path) != total_size:
+                                        raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
+                                
+                                # Create parent directory if it doesn't exist
+                                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                         
                         # Atomic rename
                         os.rename(temp_path, dest_path)
