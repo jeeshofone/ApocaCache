@@ -277,14 +277,6 @@ class ContentManager:
             if visited is None:
                 visited = set()
                 
-            # Prevent excessive recursion
-            if depth > self.config.max_scan_depth:
-                log.debug("directory.max_depth_reached", 
-                         url=url, 
-                         depth=depth, 
-                         max_depth=self.config.max_scan_depth)
-                return []
-                
             # Skip if we've already visited this URL
             if url in visited:
                 log.debug("directory.already_visited", url=url)

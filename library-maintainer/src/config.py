@@ -40,7 +40,6 @@ class Config:
         self.base_url = os.getenv("BASE_URL", "https://download.kiwix.org/zim/")
         
         # Directory scanning options
-        self.max_scan_depth = int(os.getenv("MAX_SCAN_DEPTH", "5"))
         self.excluded_dirs = os.getenv("EXCLUDED_DIRS", "").split(",")
         
         # Environment variables
