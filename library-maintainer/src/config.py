@@ -39,6 +39,10 @@ class Config:
         # Always use the official Kiwix download server
         self.base_url = os.getenv("BASE_URL", "https://download.kiwix.org/zim/")
         
+        # Directory scanning options
+        self.max_scan_depth = int(os.getenv("MAX_SCAN_DEPTH", "5"))
+        self.excluded_dirs = os.getenv("EXCLUDED_DIRS", "").split(",")
+        
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")
         self.download_all = os.getenv("DOWNLOAD_ALL", "false").lower() == "true"

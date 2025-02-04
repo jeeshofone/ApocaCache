@@ -277,12 +277,17 @@ class ContentManager:
             if visited is None:
                 visited = set()
                 
-            # Prevent infinite recursion
-            if depth > 3:  # Maximum directory depth
+            # Prevent excessive recursion
+            if depth > self.config.max_scan_depth:
+                log.debug("directory.max_depth_reached", 
+                         url=url, 
+                         depth=depth, 
+                         max_depth=self.config.max_scan_depth)
                 return []
                 
             # Skip if we've already visited this URL
             if url in visited:
+                log.debug("directory.already_visited", url=url)
                 return []
             visited.add(url)
                 
@@ -311,8 +316,11 @@ class ContentManager:
                             is_dir = href.endswith('/')
                             
                             if is_dir and self.config.scan_subdirs:
-                                # Skip certain directories that we know won't contain content
-                                if filename in ['archive', 'nightly', 'test', 'dev']:
+                                # Skip excluded directories
+                                if filename in self.config.excluded_dirs:
+                                    log.debug("directory.excluded", 
+                                            directory=filename,
+                                            excluded_dirs=self.config.excluded_dirs)
                                     continue
                                     
                                 # Recursively scan subdirectory
