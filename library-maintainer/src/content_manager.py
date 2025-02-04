@@ -15,11 +15,108 @@ import aiofiles
 from bs4 import BeautifulSoup
 import structlog
 import traceback
+from dataclasses import dataclass
+from urllib.parse import urljoin
+import aiofiles.os
+import tempfile
 
 from config import Config, ContentItem
 import monitoring
 
 log = structlog.get_logger()
+
+@dataclass
+class ContentFile:
+    """Represents a content file found on the Kiwix server."""
+    name: str
+    path: str
+    url: str
+    size: int
+    date: str
+
+class ApacheDirectoryParser:
+    """Parser for Apache's default directory listing format."""
+    
+    def __init__(self):
+        self.date_pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
+        self.size_pattern = re.compile(r'(\d+\.?\d*[KMGT]?)')
+        self.cache = {}  # Cache parsed directory listings
+        self.cache_ttl = 300  # Cache TTL in seconds
+    
+    def _get_cached(self, url: str) -> Optional[List[Tuple[str, str, str]]]:
+        """Get cached directory listing if still valid."""
+        if url in self.cache:
+            timestamp, entries = self.cache[url]
+            if time.time() - timestamp < self.cache_ttl:
+                return entries
+            del self.cache[url]
+        return None
+    
+    def _cache_result(self, url: str, entries: List[Tuple[str, str, str]]):
+        """Cache directory listing results."""
+        self.cache[url] = (time.time(), entries)
+    
+    def parse_directory_listing(self, content: str, url: str) -> List[Tuple[str, str, str]]:
+        """
+        Parse Apache directory listing HTML.
+        
+        Args:
+            content: HTML content of directory listing
+            url: URL of the directory (for caching)
+            
+        Returns:
+            List of tuples (href, date_str, size_str)
+        """
+        # Check cache first
+        cached = self._get_cached(url)
+        if cached is not None:
+            return cached
+            
+        soup = BeautifulSoup(content, 'html.parser')
+        entries = []
+        
+        # Find the pre element containing the directory listing
+        pre = soup.find('pre')
+        if not pre:
+            return []
+            
+        lines = pre.get_text().split('\n')
+        current_link = None
+        
+        for link in pre.find_all('a'):
+            href = link.get('href')
+            if not href or href == "../" or href.startswith("?C="):
+                continue
+                
+            # Find the line containing this link
+            link_line = None
+            for line in lines:
+                if href in line:
+                    link_line = line.strip()
+                    break
+                    
+            if not link_line:
+                continue
+                
+            # Parse date and size
+            parts = link_line.split()
+            date_str = None
+            size_str = "-"
+            
+            for i, part in enumerate(parts):
+                if self.date_pattern.match(part):
+                    if i + 1 < len(parts):
+                        date_str = f"{part} {parts[i+1]}"
+                        if i + 2 < len(parts):
+                            size_str = parts[i+2]
+                    break
+            
+            if date_str:
+                entries.append((href, date_str, size_str))
+        
+        # Cache the results
+        self._cache_result(url, entries)
+        return entries
 
 class ContentManager:
     """Manages ZIM file content downloads and updates."""
@@ -32,6 +129,7 @@ class ContentManager:
             config.options.max_concurrent_downloads
         )
         self.content_state: Dict[str, Dict] = {}
+        self.directory_parser = ApacheDirectoryParser()
         self._load_state()
         
         # Log initial configuration
@@ -41,6 +139,31 @@ class ContentManager:
                 content_pattern=self.config.content_pattern,
                 scan_subdirs=self.config.scan_subdirs,
                 download_all=self.config.download_all)
+    
+    def _parse_size(self, size_str: str) -> int:
+        """Parse a human-readable size string into bytes."""
+        if not size_str or size_str == '-':
+            return 0
+            
+        # Remove any whitespace
+        size_str = size_str.strip()
+        
+        # Parse size with units
+        units = {
+            'K': 1024,
+            'M': 1024 * 1024,
+            'G': 1024 * 1024 * 1024,
+            'T': 1024 * 1024 * 1024 * 1024
+        }
+        
+        try:
+            if size_str[-1] in units:
+                number = float(size_str[:-1])
+                return int(number * units[size_str[-1]])
+            return int(size_str)
+        except (ValueError, IndexError):
+            log.warning("size_parse.failed", size_str=size_str)
+            return 0
     
     def _load_state(self):
         """Load content state from state file."""
@@ -110,214 +233,137 @@ class ContentManager:
                 
             # Match language codes in Kiwix format
             # Example: wikipedia_en_all_maxi_2024-05.zim
-            pattern = f"_{lang}_all_"
-            log.debug("language_filter.pattern", 
-                    language=lang, 
-                    pattern=pattern)
+            patterns = [
+                f"_{lang}_all_",  # Standard Kiwix format
+                f"_{lang}_",      # Simple language code
+                f".{lang}.",      # Language in extension
+                f"_{lang}."       # Language at end
+            ]
             
-            if pattern in filename:
-                log.debug("language_filter.matched", 
-                        filename=filename, 
-                        pattern=pattern,
-                        language=lang)
-                return True
+            for pattern in patterns:
+                log.debug("language_filter.pattern", 
+                        language=lang, 
+                        pattern=pattern)
+                
+                if pattern in filename:
+                    log.debug("language_filter.matched", 
+                            filename=filename, 
+                            pattern=pattern,
+                            language=lang)
+                    return True
                     
         log.debug("language_filter.no_match", 
                 filename=filename, 
                 languages=self.config.language_filter)
         return False
     
-    async def _get_available_content(self) -> List[Tuple[str, str, int]]:
-        """Fetch list of available content from Kiwix server."""
-        async def scan_directory(url: str, path: str = "") -> List[Tuple[str, str, int]]:
-            """Recursively scan a directory for content."""
-            content_list = []
-            log.info("directory.scanning.start", 
-                    url=url, 
-                    path=path,
-                    scan_subdirs=self.config.scan_subdirs,
-                    content_pattern=self.config.content_pattern,
-                    language_filter=self.config.language_filter)
+    async def _get_available_content(self) -> List[ContentFile]:
+        """Get list of available content from server."""
+        
+        async def scan_directory(url: str, path: str = "") -> List[ContentFile]:
+            """
+            Scan a directory for content files.
             
-            try:
-                log.debug("directory.http_session.creating")
-                async with aiohttp.ClientSession() as session:
-                    log.debug("directory.http_request.start", url=url)
+            Args:
+                url: The base URL to scan
+                path: The relative path within the base URL
+                
+            Returns:
+                List of ContentFile objects found in the directory
+            """
+            log.debug("directory.http_session.creating")
+            async with aiohttp.ClientSession() as session:
+                log.debug("directory.http_request.start", url=url)
+                try:
                     async with session.get(url) as response:
-                        log.debug("directory.http_response.received", 
-                                status=response.status,
-                                headers=dict(response.headers))
-                        
                         if response.status != 200:
-                            log.error("directory.http_request.failed", 
-                                    status=response.status,
-                                    url=url)
-                            raise Exception(f"Failed to fetch content list: {response.status}")
-                        
-                        log.debug("directory.content.reading")
-                        html = await response.text()
-                        log.debug("directory.content.received", 
-                                content_length=len(html),
-                                content_preview=html[:200])
-                        
-                        log.debug("directory.html.parsing")
-                        soup = BeautifulSoup(html, 'html.parser')
-                        
-                        # Find the pre element containing the file list
-                        pre = soup.find('pre')
-                        if not pre:
-                            log.error("directory.html.no_pre_element",
-                                    url=url,
-                                    html_preview=html[:500])
+                            log.error("directory.http_request.failed", status=response.status)
                             return []
-                        
-                        # Process each link in the pre element
-                        links = pre.find_all('a')
-                        log.info("directory.links.found", count=len(links))
-                        
-                        if not links:
-                            log.error("directory.links.none_found", 
-                                    url=url,
-                                    html_preview=html[:500])
-                            return []
-                        
-                        # Process each link
-                        for link in links:
-                            try:
-                                href = link.get('href')
-                                if not href or href.startswith('?') or href == '../':
-                                    log.debug("directory.link.skipped", 
-                                            reason="invalid_href",
-                                            href=href)
-                                    continue
-                                
-                                log.debug("directory.link.processing", 
-                                        link_html=str(link),
-                                        link_text=link.text,
-                                        href=href)
-                                
-                                # Get the parent text node which contains size and date
-                                parent_text = link.parent.get_text()
-                                if not parent_text:
-                                    log.debug("directory.link.skipped",
-                                            reason="no_parent_text",
-                                            href=href)
-                                    continue
-                                
-                                # Extract the text after the link text
-                                metadata_text = parent_text.split(link.text)[-1].strip()
-                                if not metadata_text:
-                                    log.debug("directory.link.skipped",
-                                            reason="no_metadata",
-                                            href=href)
-                                    continue
-                                
-                                log.debug("directory.link.metadata",
-                                        href=href,
-                                        metadata=metadata_text)
-                                
-                                # Parse the text for size and date
-                                parts = metadata_text.split()
-                                if len(parts) < 3:
-                                    log.debug("directory.link.skipped",
-                                            reason="insufficient_parts",
-                                            parts=parts)
-                                    continue
-                                
+
+                        content = await response.text()
+                        entries = self.directory_parser.parse_directory_listing(content, url)
+                        content_files = []
+
+                        for href, date_str, size_str in entries:
+                            filename = href.rstrip('/')
+                            full_path = os.path.join(path, filename) if path else filename
+
+                            log.debug("directory.file.checking", 
+                                    filename=filename, 
+                                    full_path=full_path)
+
+                            # Check if this is a directory
+                            is_dir = href.endswith('/')
+                            
+                            if is_dir and self.config.scan_subdirs:
+                                # Recursively scan subdirectory
+                                subdir_url = urljoin(url + '/', href)
+                                log.info("directory.subdir.scanning",
+                                        subdir=filename,
+                                        url=subdir_url)
                                 try:
-                                    # Try to parse date and size
-                                    date_str = f"{parts[0]} {parts[1]}"
-                                    size_str = parts[2]
-                                    
-                                    log.debug("directory.link.parsing",
-                                            date=date_str,
-                                            size=size_str)
-                                    
-                                    # Convert size to bytes
-                                    if size_str == '-':
-                                        size = 0
-                                    else:
-                                        size = int(size_str)
-                                    
-                                    filename = href.rstrip('/')
-                                    
-                                    if filename.endswith('.zim'):
-                                        full_path = os.path.join(path, filename) if path else filename
-                                        log.debug("directory.file.checking",
-                                                filename=filename,
-                                                full_path=full_path)
-                                        
-                                        # Check if file matches content pattern and language filter
-                                        matches_pattern = self._matches_content_pattern(filename)
-                                        matches_language = self._matches_language_filter(filename)
-                                        
-                                        log.debug("directory.file.matches",
-                                                filename=filename,
-                                                matches_pattern=matches_pattern,
-                                                matches_language=matches_language,
-                                                pattern=self.config.content_pattern,
-                                                languages=self.config.language_filter)
-                                        
-                                        if matches_pattern and matches_language:
-                                            content_list.append((full_path, date_str, size))
-                                            log.info("directory.file.added", 
-                                                   filename=full_path,
-                                                   size=size,
-                                                   date=date_str)
-                                        else:
-                                            log.debug("directory.file.filtered", 
-                                                    filename=full_path,
-                                                    matches_pattern=matches_pattern,
-                                                    matches_language=matches_language)
-                                    elif href.endswith('/') and self.config.scan_subdirs:
-                                        # This is a directory, scan it recursively if scan_subdirs is enabled
-                                        subdir_name = filename
-                                        subdir_url = f"{url.rstrip('/')}/{subdir_name}"
-                                        subdir_path = os.path.join(path, subdir_name) if path else subdir_name
-                                        
-                                        log.info("directory.subdir.scanning",
-                                                subdir=subdir_path,
-                                                url=subdir_url)
-                                        
-                                        subdir_content = await scan_directory(subdir_url, subdir_path)
-                                        content_list.extend(subdir_content)
-                                        
-                                        log.info("directory.subdir.scanned", 
-                                               subdir=subdir_path,
-                                               files_found=len(subdir_content))
+                                    subdir_files = await scan_directory(subdir_url, full_path)
+                                    content_files.extend(subdir_files)
                                 except Exception as e:
-                                    log.error("directory.link.parse_failed", 
-                                            text=metadata_text,
+                                    log.error("directory.subdir.scan_failed",
                                             error=str(e),
                                             traceback=traceback.format_exc())
-                                    continue
-                            except Exception as e:
-                                log.error("directory.link.process_failed",
-                                        link=str(link),
-                                        error=str(e),
-                                        traceback=traceback.format_exc())
                                 continue
-                        
+
+                            # Check if file matches content pattern
+                            if not self._matches_content_pattern(filename):
+                                log.debug("directory.file.filtered", 
+                                        filename=filename,
+                                        matches_pattern=False)
+                                continue
+
+                            # Check if file matches language filter
+                            if not self._matches_language_filter(filename):
+                                log.debug("directory.file.filtered",
+                                        filename=filename, 
+                                        matches_language=False)
+                                continue
+
+                            # Parse size
+                            size = self._parse_size(size_str)
+
+                            log.debug("directory.file.matches",
+                                    filename=filename,
+                                    matches_pattern=True,
+                                    matches_language=True)
+
+                            log.info("directory.file.added",
+                                    filename=full_path,
+                                    date=date_str,
+                                    size=size)
+
+                            content_file = ContentFile(
+                                name=filename,
+                                path=full_path,
+                                url=urljoin(url + '/', href),
+                                size=size,
+                                date=date_str
+                            )
+                            content_files.append(content_file)
+
                         log.info("directory.scanning.complete",
-                                url=url,
+                                files_found=len(content_files),
                                 path=path,
-                                files_found=len(content_list))
-                        return content_list
+                                url=url)
+                        return content_files
                         
-            except Exception as e:
-                log.error("directory.scanning.failed",
-                         url=url,
-                         path=path,
-                         error=str(e),
-                         traceback=traceback.format_exc())
-                raise
+                except aiohttp.ClientError as e:
+                    log.error("directory.http_request.failed",
+                            error=str(e),
+                            url=url)
+                    return []
         
         try:
             log.info("content_list.scan.starting", base_url=self.base_url)
             content_list = await scan_directory(self.base_url)
             log.info("content_list.scan.complete", 
                     count=len(content_list), 
-                    items=[item[0] for item in content_list])
+                    items=[item.name for item in content_list])
             return content_list
         except Exception as e:
             log.error("content_list.scan.failed",
@@ -326,19 +372,39 @@ class ContentManager:
             raise
     
     async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
-        """Download a file with progress tracking and verification."""
+        """
+        Download a file with progress tracking and verification.
+        
+        Args:
+            url: The URL to download from (can be relative or absolute)
+            dest_path: The destination path to save the file
+            content: The content item being downloaded
+            
+        Returns:
+            bool: True if download was successful, False otherwise
+        """
         temp_path = f"{dest_path}.tmp"
         
         async with self.download_semaphore:
             try:
+                # Ensure URL is absolute
+                download_url = url if url.startswith('http') else urljoin(self.base_url, url)
+                log.info("download.starting", 
+                        content=content.name,
+                        url=download_url,
+                        dest=dest_path)
+                
                 async with aiohttp.ClientSession() as session:
-                    # Handle full paths with subdirectories
-                    download_url = f"{self.base_url.rstrip('/')}/{url}"
                     async with session.get(download_url) as response:
                         if response.status != 200:
                             raise Exception(f"Download failed: {response.status}")
                         
                         total_size = int(response.headers.get('content-length', 0))
+                        if total_size == 0:
+                            log.warning("download.no_content_length",
+                                      content=content.name,
+                                      url=download_url)
+                        
                         downloaded = 0
                         
                         # Create parent directory if it doesn't exist
@@ -353,26 +419,48 @@ class ContentManager:
                                     content.language,
                                     downloaded
                                 )
+                                
+                                # Log progress for large files
+                                if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:  # Every 10MB
+                                    progress = (downloaded / total_size) * 100
+                                    log.debug("download.progress",
+                                            content=content.name,
+                                            progress=f"{progress:.1f}%",
+                                            downloaded=downloaded,
+                                            total=total_size)
                 
                 if self.config.options.verify_downloads:
-                    # Verify download
-                    if os.path.getsize(temp_path) != total_size:
-                        raise Exception("Download size mismatch")
+                    # Verify download size if we know the expected size
+                    if total_size > 0 and os.path.getsize(temp_path) != total_size:
+                        raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
                 
                 # Create parent directory if it doesn't exist
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                
+                # Atomic rename
                 os.rename(temp_path, dest_path)
+                
+                log.info("download.complete",
+                        content=content.name,
+                        size=os.path.getsize(dest_path))
+                        
                 monitoring.record_download("success", content.language)
                 return True
                 
             except Exception as e:
                 log.error("download.failed",
                          content=content.name,
-                         error=str(e))
+                         error=str(e),
+                         traceback=traceback.format_exc())
                 monitoring.record_download("failed", content.language)
                 
                 if os.path.exists(temp_path):
-                    os.remove(temp_path)
+                    try:
+                        os.remove(temp_path)
+                    except Exception as e:
+                        log.error("download.cleanup_failed",
+                                content=content.name,
+                                error=str(e))
                 return False
     
     async def update_content(self):
@@ -394,38 +482,39 @@ class ContentManager:
                          content_language=content_item.language,
                          content_category=content_item.category)
                 
-                # Find matching content
                 latest_version = None
                 latest_date = None
                 
                 # Pattern for matching content files
-                # Example: wikipedia_en_all_maxi_2024-05.zim
-                pattern = f"{content_item.category}_{content_item.language}_all_.*_\\d{{4}}-\\d{{2}}.zim$"
+                # Handle various formats:
+                # - wikipedia_en_all_maxi_2024-05.zim
+                # - devdocs_en_angular_2025-01.zim
+                # - freecodecamp_en_javascript_2024-10.zim
+                pattern = f"{content_item.name}.*_\\d{{4}}-\\d{{2}}.zim$"
                 log.debug("content_update.pattern", pattern=pattern)
                 
-                for filepath, date_str, size in available_content:
-                    filename = os.path.basename(filepath)
+                for content_file in available_content:
+                    filename = os.path.basename(content_file.path)
                     log.debug("content_update.checking_file", 
                              filename=filename,
-                             filepath=filepath,
-                             date=date_str,
-                             size=size)
+                             filepath=content_file.path,
+                             date=content_file.date,
+                             size=content_file.size)
                     
-                    if re.match(pattern, filename):
+                    if re.search(pattern, filename):
                         log.info("content_update.found_match",
                                 content_name=content_item.name,
                                 filename=filename,
-                                filepath=filepath,
-                                date=date_str)
+                                date=content_file.date,
+                                size=content_file.size)
                         
                         # Keep track of the latest version
-                        if not latest_date or date_str > latest_date:
-                            latest_version = (filepath, date_str, size)
-                            latest_date = date_str
+                        if not latest_date or content_file.date > latest_date:
+                            latest_version = content_file
+                            latest_date = content_file.date
                 
                 if latest_version:
-                    filepath, date_str, size = latest_version
-                    filename = os.path.basename(filepath)
+                    filename = os.path.basename(latest_version.path)
                     
                     # Create category subdirectory
                     category_dir = os.path.join(self.config.data_dir, content_item.category)
@@ -438,8 +527,8 @@ class ContentManager:
                     
                     # Create state for this content
                     state = {
-                        'last_updated': date_str,
-                        'size': size,
+                        'last_updated': latest_version.date,
+                        'size': latest_version.size,
                         'path': dest_path
                     }
                     
@@ -449,22 +538,22 @@ class ContentManager:
                     # Check if download/update needed
                     if self.config.should_download_content(content_item):
                         needs_download = not os.path.exists(dest_path)
-                        needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != date_str
+                        needs_update = self.content_state.get(content_item.name, {}).get('last_updated') != latest_version.date
                         
                         log.info("content_update.download_check",
                                 content_name=content_item.name,
                                 needs_download=needs_download,
                                 needs_update=needs_update,
                                 current_date=self.content_state.get(content_item.name, {}).get('last_updated'),
-                                new_date=date_str)
+                                new_date=latest_version.date)
                         
                         if needs_download or needs_update:
                             log.info("content_update.queueing_download",
                                     content_name=content_item.name,
                                     filename=filename,
-                                    size=size)
+                                    size=latest_version.size)
                             download_task = self._download_file(
-                                filepath,  # Use the full path from the server
+                                latest_version.url,
                                 dest_path,
                                 content_item
                             )
