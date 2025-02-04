@@ -432,16 +432,16 @@ class ContentManager:
                                 
                                 # Create parent directory if it doesn't exist
                                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                        
-                        # Atomic rename
-                        os.rename(temp_path, dest_path)
-                        
-                        log.info("download.complete",
-                                content=content.name,
-                                size=os.path.getsize(dest_path))
                                 
-                        monitoring.record_download("success", content.language)
-                        return True
+                                # Atomic rename
+                                os.rename(temp_path, dest_path)
+                                
+                                log.info("download.complete",
+                                        content=content.name,
+                                        size=os.path.getsize(dest_path))
+                                        
+                                monitoring.record_download("success", content.language)
+                                return True
                     
                 except Exception as e:
                     error_details = {
