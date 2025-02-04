@@ -433,7 +433,7 @@ class ContentManager:
                     )
                     
                     async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(download_url) as response:
+                        async with session.get(download_url) as response:
                         if response.status != 200:
                             raise Exception(f"Download failed: {response.status}")
                         
