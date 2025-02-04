@@ -427,12 +427,12 @@ class ContentManager:
                     
                     # Configure timeouts for large downloads
                     timeout = aiohttp.ClientTimeout(
-                    total=None,  # No total timeout
-                    connect=60,  # 60 seconds to establish connection
-                    sock_read=300  # 5 minutes to read data chunks
-                )
-                
-                async with aiohttp.ClientSession(timeout=timeout) as session:
+                        total=None,  # No total timeout
+                        connect=60,  # 60 seconds to establish connection
+                        sock_read=300  # 5 minutes to read data chunks
+                    )
+                    
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(download_url) as response:
                         if response.status != 200:
                             raise Exception(f"Download failed: {response.status}")
@@ -467,23 +467,23 @@ class ContentManager:
                                             downloaded=downloaded,
                                             total=total_size)
                 
-                if self.config.options.verify_downloads:
-                    # Verify download size if we know the expected size
-                    if total_size > 0 and os.path.getsize(temp_path) != total_size:
-                        raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
-                
-                # Create parent directory if it doesn't exist
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                
-                # Atomic rename
-                os.rename(temp_path, dest_path)
-                
-                log.info("download.complete",
-                        content=content.name,
-                        size=os.path.getsize(dest_path))
+                        if self.config.options.verify_downloads:
+                            # Verify download size if we know the expected size
+                            if total_size > 0 and os.path.getsize(temp_path) != total_size:
+                                raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
                         
-                    monitoring.record_download("success", content.language)
-                    return True
+                        # Create parent directory if it doesn't exist
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        
+                        # Atomic rename
+                        os.rename(temp_path, dest_path)
+                        
+                        log.info("download.complete",
+                                content=content.name,
+                                size=os.path.getsize(dest_path))
+                                
+                        monitoring.record_download("success", content.language)
+                        return True
                     
                 except Exception as e:
                     retry_count += 1
