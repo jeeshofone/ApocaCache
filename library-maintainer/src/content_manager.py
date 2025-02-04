@@ -407,14 +407,14 @@ class ContentManager:
                                 os.makedirs(os.path.dirname(temp_path), exist_ok=True)
                                 
                                 async with aiofiles.open(temp_path, 'wb') as f:
-                            async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
-                                await f.write(chunk)
-                                downloaded += len(chunk)
-                                monitoring.update_content_size(
-                                    content.name,
-                                    content.language,
-                                    downloaded
-                                )
+                                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                                        await f.write(chunk)
+                                        downloaded += len(chunk)
+                                        monitoring.update_content_size(
+                                            content.name,
+                                            content.language,
+                                            downloaded
+                                        )
                                 
                                 # Log progress for large files
                                 if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:  # Every 10MB
