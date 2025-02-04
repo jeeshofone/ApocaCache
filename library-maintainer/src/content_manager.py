@@ -402,11 +402,11 @@ class ContentManager:
                                               url=download_url)
                                 
                                 downloaded = 0
-                        
-                        # Create parent directory if it doesn't exist
-                        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                        
-                        async with aiofiles.open(temp_path, 'wb') as f:
+                                
+                                # Create parent directory if it doesn't exist
+                                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                                
+                                async with aiofiles.open(temp_path, 'wb') as f:
                             async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
                                 await f.write(chunk)
                                 downloaded += len(chunk)
