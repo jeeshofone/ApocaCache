@@ -483,9 +483,47 @@ class ContentManager:
                                     content=content.name,
                                     error=str(cleanup_error))
                     return False
-                
-                # If we get here, download was successful
-                return True
+                except Exception as e:
+                    error_details = {
+                        'type': type(e).__name__,
+                        'message': str(e),
+                        'traceback': traceback.format_exc()
+                    }
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        log.warning("download.retry",
+                                  content=content.name,
+                                  error=error_details,
+                                  attempt=retry_count,
+                                  max_attempts=max_retries + 1)
+                        # Clean up failed temp file before retry
+                        if os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except Exception as cleanup_error:
+                                log.error("download.cleanup_failed",
+                                        content=content.name,
+                                        error=str(cleanup_error))
+                        # Wait before retry with exponential backoff
+                        await asyncio.sleep(2 ** retry_count)
+                        continue
+                    
+                    # All retries exhausted
+                    log.error("download.failed",
+                             content=content.name,
+                             error=str(e),
+                             attempts=retry_count,
+                             traceback=traceback.format_exc())
+                    monitoring.record_download("failed", content.language)
+                    
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception as cleanup_error:
+                            log.error("download.cleanup_failed",
+                                    content=content.name,
+                                    error=str(cleanup_error))
+                    return False
     
     async def update_content(self):
         """Update content based on configuration."""
