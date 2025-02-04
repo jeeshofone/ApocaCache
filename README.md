@@ -3,7 +3,148 @@ This project is currently under active development. Features may be incomplete o
 
 # ApocaCache
 
-A distributed caching system for Kiwix ZIM files.
+A robust library maintainer for offline content caching, specifically designed to manage and maintain Kiwix ZIM files. This project helps maintain an up-to-date offline cache of educational content, documentation, and knowledge bases.
+
+## Features
+
+- **Automated Content Management**: Automatically downloads and maintains ZIM files from Kiwix servers
+- **Smart Updates**: Only downloads new or updated content based on file dates and sizes
+- **Language Filtering**: Configurable language filtering to download content in specific languages
+- **Concurrent Downloads**: Manages multiple downloads with configurable concurrency limits
+- **Robust Error Handling**: Implements retries, timeouts, and cleanup for failed downloads
+- **Progress Monitoring**: Detailed logging and progress tracking for downloads
+- **Apache Directory Parsing**: Efficient parsing of Apache directory listings with caching
+- **State Management**: Maintains download state and content metadata
+
+## Project Structure
+
+```
+ApocaCache/
+├── library-maintainer/
+│   ├── src/
+│   │   ├── content_manager.py    # Core content management logic
+│   │   ├── config.py            # Configuration handling
+│   │   ├── monitoring.py        # Monitoring and metrics
+│   │   └── main.py             # Application entry point
+│   ├── tests/
+│   │   ├── integration/        # Integration tests
+│   │   └── unit/              # Unit tests
+│   ├── Dockerfile             # Container definition
+│   └── requirements.txt       # Python dependencies
+├── docker-compose.yaml        # Service orchestration
+└── README.md                 # This file
+```
+
+## Configuration
+
+### Environment Variables
+
+- `BASE_URL`: Kiwix download server URL (default: "https://download.kiwix.org/zim/")
+- `LANGUAGE_FILTER`: Comma-separated list of language codes (e.g., "eng,en")
+- `DOWNLOAD_ALL`: Whether to download all content regardless of filters (default: false)
+- `CONTENT_PATTERN`: Regex pattern for content matching (default: ".*")
+- `SCAN_SUBDIRS`: Whether to scan subdirectories (default: false)
+- `UPDATE_SCHEDULE`: Cron-style schedule for updates (default: "0 2 1 * *")
+- `EXCLUDED_DIRS`: Comma-separated list of directories to exclude from scanning
+
+### Download List Configuration
+
+Create a `download-list.yaml` in your data directory:
+
+```yaml
+options:
+  max_concurrent_downloads: 2
+  retry_attempts: 3
+  verify_downloads: true
+  cleanup_incomplete: true
+
+content:
+  - name: "wikipedia"
+    language: "eng"
+    category: "encyclopedia"
+    description: "English Wikipedia"
+  - name: "devdocs"
+    language: "en"
+    category: "documentation"
+    description: "Developer Documentation"
+```
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/ApocaCache.git
+cd ApocaCache
+```
+
+2. Build the container:
+```bash
+docker-compose build
+```
+
+3. Create your configuration:
+```bash
+mkdir -p data
+cp example-download-list.yaml data/download-list.yaml
+# Edit data/download-list.yaml with your content preferences
+```
+
+4. Start the service:
+```bash
+docker-compose up -d
+```
+
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- Docker and Docker Compose
+- Make (optional, for development commands)
+
+### Setting up Development Environment
+
+1. Create a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+```
+
+2. Install dependencies:
+```bash
+pip install -r library-maintainer/requirements.txt
+pip install -r library-maintainer/tests/requirements.test.txt
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+docker-compose -f tests/docker-compose.test.yaml run --rm test-runner pytest
+
+# Run specific test file
+docker-compose -f tests/docker-compose.test.yaml run --rm test-runner pytest tests/integration/test_content_manager.py
+
+# Run with coverage
+docker-compose -f tests/docker-compose.test.yaml run --rm test-runner pytest --cov=src tests/
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- [Kiwix](https://www.kiwix.org/) for providing the ZIM file infrastructure
+- The open-source community for various libraries used in this project
 
 ## About the Name
 
@@ -96,94 +237,6 @@ The English-all configuration includes:
 - Kiwix web interface accessible at http://localhost:3119
 
 More example configurations can be found in the `examples/` directory.
-
-## Configuration
-
-### Environment Variables
-
-- `LANGUAGE_FILTER`: Filter content by language codes (e.g., "en,es" using ISO 639-1 codes)
-- `UPDATE_SCHEDULE`: Cron expression for update schedule (default: "0 2 1 * *")
-- `DOWNLOAD_ALL`: Boolean flag to download all available content (default: false)
-- `KIWIX_SERVER_URL`: URL for the Kiwix server (default: "http://kiwix-serve")
-- `UID`: User ID for container processes (defaults to current user's UID)
-- `GID`: Group ID for container processes (defaults to current user's GID)
-
-### Custom Download List
-
-Create a `download-list.yaml` file:
-
-```yaml
-content:
-  - name: "wikipedia_en"
-    language: "en"
-    category: "wikipedia"
-  - name: "wiktionary_es"
-    language: "es"
-    category: "wiktionary"
-```
-
-## Development Setup
-
-### Prerequisites
-- Python 3.11+
-- Docker and Docker Compose
-- pytest for testing
-
-### Building Images
-```bash
-# Build all images
-docker-compose build
-
-# Build specific service
-docker-compose build library-maintainer
-```
-
-### Running Tests
-```bash
-cd library-maintainer
-docker-compose -f tests/docker-compose.test.yaml down -v
-docker-compose -f tests/docker-compose.test.yaml build --no-cache
-docker-compose -f tests/docker-compose.test.yaml run --rm integration-tests pytest tests/ -v
-```
-
-## Project Structure
-```
-library-maintainer/
-├── src/
-│   ├── content_manager.py  # Content download and management
-│   ├── library_manager.py  # Library.xml generation
-│   └── config.py          # Configuration handling
-├── tests/
-│   ├── integration/       # Integration tests
-│   │   ├── test_content_manager.py
-│   │   └── test_library_manager.py
-│   └── fixtures/         # Test fixtures
-│       └── mock-kiwix-server/
-└── docker-compose.test.yaml
-```
-
-## Contributing
-Currently in active development. See todo.md for current tasks and progress.
-
-## Overview
-
-ApocaCache automates the process of downloading, managing, and serving Kiwix ZIM files through a containerized solution. It provides a reliable way to maintain an up-to-date offline Wikipedia and other Kiwix-supported content.
-
-### Components
-
-1. **Library Maintainer Container**: Manages the downloading and updating of Kiwix ZIM files
-   - Automated content updates
-   - Content filtering by language
-   - Custom download lists via YAML configuration
-   - Library.xml management
-
-2. **Kiwix Serve Container**: Serves the content using the official Kiwix server
-   - Based on ghcr.io/kiwix/kiwix-serve:latest
-   - Configured to serve content from shared volume
-
-## License
-
-[MIT License](LICENSE)
 
 ## Security
 
