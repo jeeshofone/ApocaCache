@@ -301,27 +301,16 @@ class ContentManager:
                             filename = href.rstrip('/')
                             full_path = os.path.join(path, filename) if path else filename
 
-                            log.debug("directory.file.checking", 
-                                    filename=filename, 
-                                    full_path=full_path)
-
                             # Check if this is a directory
                             is_dir = href.endswith('/')
                             
                             if is_dir and self.config.scan_subdirs:
                                 # Skip excluded directories
                                 if filename in self.config.excluded_dirs:
-                                    log.debug("directory.excluded", 
-                                            directory=filename,
-                                            excluded_dirs=self.config.excluded_dirs)
                                     continue
                                     
                                 # Recursively scan subdirectory
                                 subdir_url = urljoin(url + '/', href)
-                                log.info("directory.subdir.scanning",
-                                        subdir=filename,
-                                        url=subdir_url,
-                                        depth=depth)
                                 try:
                                     subdir_files = await scan_directory(
                                         subdir_url, 
@@ -336,32 +325,15 @@ class ContentManager:
                                             traceback=traceback.format_exc())
                                 continue
 
-                            # Check if file matches content pattern
-                            if not self._matches_content_pattern(filename):
-                                log.debug("directory.file.filtered", 
-                                        filename=filename,
-                                        matches_pattern=False)
-                                continue
-
-                            # Check if file matches language filter
-                            if not self._matches_language_filter(filename):
-                                log.debug("directory.file.filtered",
-                                        filename=filename, 
-                                        matches_language=False)
+                            # Check filters
+                            matches_pattern = self._matches_content_pattern(filename)
+                            matches_language = self._matches_language_filter(filename)
+                            
+                            if not (matches_pattern and matches_language):
                                 continue
 
                             # Parse size
                             size = self._parse_size(size_str)
-
-                            log.debug("directory.file.matches",
-                                    filename=filename,
-                                    matches_pattern=True,
-                                    matches_language=True)
-
-                            log.info("directory.file.added",
-                                    filename=full_path,
-                                    date=date_str,
-                                    size=size)
 
                             content_file = ContentFile(
                                 name=filename,
@@ -372,10 +344,12 @@ class ContentManager:
                             )
                             content_files.append(content_file)
 
-                        log.info("directory.scanning.complete",
-                                files_found=len(content_files),
-                                path=path,
-                                url=url)
+                        total_files = len(entries)
+                        matched_files = len(content_files)
+                        log.info("directory.scan_summary",
+                                directory=path or "root",
+                                total_files=total_files,
+                                matched_files=matched_files)
                         return content_files
                         
                 except aiohttp.ClientError as e:
