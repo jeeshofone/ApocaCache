@@ -503,12 +503,6 @@ class ContentManager:
                 
                 for content_file in available_content:
                     filename = os.path.basename(content_file.path)
-                    log.debug("content_update.checking_file", 
-                             filename=filename,
-                             filepath=content_file.path,
-                             date=content_file.date,
-                             size=content_file.size)
-                    
                     if re.search(pattern, filename):
                         log.info("content_update.found_match",
                                 content_name=content_item.name,
