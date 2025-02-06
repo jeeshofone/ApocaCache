@@ -13,13 +13,11 @@ services:
       - MAX_CONCURRENT_DOWNLOADS=3
       - VERIFY_DOWNLOADS=true
       - LOG_LEVEL=DEBUG  # Enhanced logging level
-      - DEBUG_CONTENT_MATCHING=true  # Add detailed content matching logs
-      - PRINT_CONTENT_LIST=true  # Print full content list being processed
-      - CONTENT_PATTERN=.*_en.*|.*english.*|.*_eng_.*|.*_en_all.*  # Enhanced pattern to match more English content variants
-      - SCAN_SUBDIRS=true  # Scan all subdirectories
       - MEMORY_LIMIT=4G  # Increase memory limit for larger datasets
       - DOWNLOAD_TIMEOUT=3600  # Increase download timeout to 1 hour
       - BASE_URL=https://download.kiwix.org/zim/  # Explicitly set the base URL
+    ports:
+      - "3118:3118"  # Web interface port
     volumes:
       - ./kiwix:/data:rw
     user: "1000:1000"
@@ -27,7 +25,7 @@ services:
     networks:
       - kiwix_network
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; os.access('/data/library.xml', os.R_OK) or exit(1)"]
+      test: ["CMD", "curl", "-f", "http://localhost:3118/"]  # Updated healthcheck to use web interface
       interval: 30s
       timeout: 10s
       retries: 3

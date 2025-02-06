@@ -26,6 +26,7 @@ class ContentOptions:
     retry_attempts: int = 3
     verify_downloads: bool = True
     cleanup_incomplete: bool = True
+    update_interval: int = 3600
 
 class Config:
     """Main configuration class."""
@@ -39,14 +40,9 @@ class Config:
         # Always use the official Kiwix download server
         self.base_url = os.getenv("BASE_URL", "https://download.kiwix.org/zim/")
         
-        # Directory scanning options
-        self.excluded_dirs = os.getenv("EXCLUDED_DIRS", "").split(",")
-        
         # Environment variables
         self.language_filter = os.getenv("LANGUAGE_FILTER", "").split(",")
         self.download_all = os.getenv("DOWNLOAD_ALL", "false").lower() == "true"
-        self.content_pattern = os.getenv('CONTENT_PATTERN', '.*')
-        self.scan_subdirs = os.getenv('SCAN_SUBDIRS', 'false').lower() == 'true'
         
         # Parse update schedule
         schedule_str = os.getenv("UPDATE_SCHEDULE", "0 2 1 * *")

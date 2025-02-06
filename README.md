@@ -15,6 +15,8 @@ A robust library maintainer for offline content caching, specifically designed t
 - **Progress Monitoring**: Detailed logging and progress tracking for downloads
 - **Apache Directory Parsing**: Efficient parsing of Apache directory listings with caching
 - **State Management**: Maintains download state and content metadata
+- **Web Interface**: Accessible at `http://localhost:3118` for browsing and selecting content
+- **Prometheus Metrics**: Available at `http://localhost:9090/metrics` for monitoring
 
 ## Project Structure
 
@@ -159,44 +161,25 @@ This project enables you to:
 
 Think of it as your "knowledge bunker" - always ready, always accessible, regardless of what happens to the broader internet infrastructure.
 
-## Project Status (2025-02-06)
-All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic, content state management, proper permission handling, and improved MD5 verification.
+## Project Status (2025-02-07)
 
-### Components
-- **Library Maintainer**: Manages ZIM file downloads and library.xml generation
-  - Content state management with atomic updates
-  - Concurrent downloads with semaphore control
-  - Progress tracking and monitoring
-  - Enhanced file matching logic
-  - Improved error handling
-  - Proper permission handling with configurable UID/GID
-  - Enhanced MD5 verification system
-    - Pre-download MD5 verification
-    - Detailed verification logging
-    - MD5 state tracking
-    - Improved integrity checks
-  - Detailed verification logging
-
-### Recent Achievements
-- Implemented comprehensive MD5 verification system
-  - Added pre-download MD5 checks
-  - Enhanced MD5 state tracking
+### Latest Updates
+- Enhanced MD5 verification system
+  - Proper meta4 file hash extraction
   - Improved verification logging
-- Enhanced download integrity checks
-- Fixed content state update mechanism
-- Improved file matching logic
-- Enhanced logging and error handling
-- All integration tests passing
-- Verified concurrent download functionality
-- Confirmed atomic state updates
-- Added proper permission handling with configurable UID/GID
+  - Fixed verification skipping issue
+- Successful testing of English-all configuration
+- Verified container orchestration
+- Confirmed monitoring setup
+- Validated content download process
+- Tested library XML generation
 
-### Current Development Focus
-- Performance optimization
-- Monitoring enhancements
-- Content validation
-- Documentation improvements
-- Example configurations
+### Current Focus
+- Comprehensive error handling for meta4 file parsing
+- Progress tracking for large downloads
+- Support for concurrent downloads
+- Enhanced monitoring metrics
+- Web UI improvements
 
 ## Quick Start
 
@@ -278,4 +261,32 @@ This project is designed to work immediately after cloning. The repository has b
 
 If you encounter any issues on first run, please ensure that the volume mappings and file permissions are correctly configured, and verify that the default entries in `examples/kiwix/library.xml` suit your needs.
 
---- 
+## Web Interface
+
+The library maintainer provides a web interface for managing content downloads:
+
+- **Content Browser**: Available at `http://localhost:3118`
+  - Browse available Kiwix content
+  - Filter by language and category
+  - Queue content for download
+  - Monitor download progress
+  - View download status
+
+- **Monitoring**: Available at `http://localhost:9090/metrics`
+  - Download statistics
+  - Content size metrics
+  - Update duration tracking
+  - Library size monitoring
+
+### Web Interface Features
+
+- **Content Selection**: Browse and select content from the Kiwix library
+- **Download Management**: Queue and monitor downloads
+- **Progress Tracking**: Real-time download progress updates
+- **Status Overview**: View active downloads and queue size
+- **Library Statistics**: Monitor total library size and content count
+
+## Usage
+
+1. Start the service:
+   ```
