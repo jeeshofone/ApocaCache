@@ -225,8 +225,11 @@ class ContentManager:
     async def _fetch_library_xml(self) -> Optional[ET.Element]:
         """Fetch and parse the central library XML file."""
         try:
-            # Check for cached local copy first
+            # Check for cached local copy in shared data folder
             local_library_file = os.path.join(self.config.data_dir, "library_zim.xml")
+            
+            # Create data directory if it doesn't exist
+            os.makedirs(self.config.data_dir, exist_ok=True)
             
             if os.path.exists(local_library_file):
                 log.info("library_xml.using_local_cache", path=local_library_file)
@@ -243,13 +246,13 @@ class ContentManager:
                         return None
                     content = await response.text()
                     
-                    # Cache the XML locally
+                    # Cache the XML in shared data folder
                     try:
                         async with aiofiles.open(local_library_file, 'w') as f:
                             await f.write(content)
                         log.info("library_xml.cached", path=local_library_file)
                     except Exception as e:
-                        log.error("library_xml.cache_failed", error=str(e))
+                        log.error("library_xml.cache_failed", error=str(e), path=local_library_file)
                     
                     return ET.fromstring(content)
         except Exception as e:
