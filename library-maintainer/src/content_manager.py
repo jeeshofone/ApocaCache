@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from urllib.parse import urljoin
 import aiofiles.os
 import tempfile
+import xml.etree.ElementTree as ET
 
 from config import Config, ContentItem
 import monitoring
@@ -35,6 +36,11 @@ class ContentFile:
     size: int
     date: str
     md5_url: str = ""
+    mirrors: List[str] = None
+
+    def __post_init__(self):
+        if self.mirrors is None:
+            self.mirrors = []
 
 class ApacheDirectoryParser:
     """Parser for Apache's default directory listing format."""
@@ -132,6 +138,7 @@ class ContentManager:
         )
         self.content_state: Dict[str, Dict] = {}
         self.directory_parser = ApacheDirectoryParser()
+        self.library_xml_url = "https://download.kiwix.org/library/library_zim.xml"
         self._load_state()
         
         # Log initial configuration
@@ -231,120 +238,93 @@ class ContentManager:
                     
         return False
     
-    async def _get_available_content(self) -> List[ContentFile]:
-        """Get list of available content from server."""
-        
-        async def scan_directory(url: str, path: str = "", depth: int = 0, visited: set = None) -> List[ContentFile]:
-            """
-            Scan a directory for content files.
-            
-            Args:
-                url: The base URL to scan
-                path: The relative path within the base URL
-                depth: Current recursion depth
-                visited: Set of visited URLs to prevent loops
-                
-            Returns:
-                List of ContentFile objects found in the directory
-            """
-            # Initialize visited set on first call
-            if visited is None:
-                visited = set()
-                
-            # Skip if we've already visited this URL
-            if url in visited:
-                log.debug("directory.already_visited", url=url)
-                return []
-            visited.add(url)
-                
-            log.debug("directory.http_session.creating")
-            timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout for directory listing
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                log.debug("directory.http_request.start", url=url)
-                try:
-                    async with session.get(url, timeout=timeout) as response:
-                        if response.status != 200:
-                            log.error("directory.http_request.failed", status=response.status)
-                            return []
-
-                        content = await response.text()
-                        entries = self.directory_parser.parse_directory_listing(content, url)
-                        content_files = []
-
-                        for href, date_str, size_str in entries:
-                            filename = href.rstrip('/')
-                            full_path = os.path.join(path, filename) if path else filename
-
-                            # Check if this is a directory
-                            is_dir = href.endswith('/')
-                            
-                            if is_dir and self.config.scan_subdirs:
-                                # Skip excluded directories
-                                if filename in self.config.excluded_dirs:
-                                    continue
-                                    
-                                # Recursively scan subdirectory
-                                subdir_url = urljoin(url + '/', href)
-                                try:
-                                    subdir_files = await scan_directory(
-                                        subdir_url, 
-                                        full_path,
-                                        depth + 1,
-                                        visited
-                                    )
-                                    content_files.extend(subdir_files)
-                                except Exception as e:
-                                    log.error("directory.subdir.scan_failed",
-                                            error=str(e),
-                                            traceback=traceback.format_exc())
-                                continue
-
-                            # Check filters
-                            matches_pattern = self._matches_content_pattern(filename)
-                            matches_language = self._matches_language_filter(filename)
-                            
-                            if not (matches_pattern and matches_language):
-                                continue
-
-                            # Parse size
-                            size = self._parse_size(size_str)
-
-                            content_file = ContentFile(
-                                name=filename,
-                                path=full_path,
-                                url=urljoin(url + '/', href),
-                                size=size,
-                                date=date_str
-                            )
-                            content_files.append(content_file)
-
-                        total_files = len(entries)
-                        matched_files = len(content_files)
-                        log.info("directory.scan_summary",
-                                directory=path or "root",
-                                total_files=total_files,
-                                matched_files=matched_files)
-                        return content_files
-                        
-                except aiohttp.ClientError as e:
-                    log.error("directory.http_request.failed",
-                            error=str(e),
-                            url=url)
-                    return []
-        
+    async def _fetch_library_xml(self) -> Optional[ET.Element]:
+        """Fetch and parse the central library XML file."""
         try:
-            log.info("content_list.scan.starting", base_url=self.base_url)
-            content_list = await scan_directory(self.base_url, depth=0)
-            log.info("content_list.scan.complete", 
-                    count=len(content_list), 
-                    items=[item.name for item in content_list])
-            return content_list
+            log.info("library_xml.fetching", url=self.library_xml_url)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.library_xml_url) as response:
+                    if response.status != 200:
+                        log.error("library_xml.fetch_failed", status=response.status)
+                        return None
+                    content = await response.text()
+                    return ET.fromstring(content)
         except Exception as e:
-            log.error("content_list.scan.failed",
-                     error=str(e),
-                     traceback=traceback.format_exc())
-            raise
-    
+            log.error("library_xml.fetch_failed", error=str(e))
+            return None
+
+    async def _fetch_meta4_file(self, url: str) -> List[str]:
+        """Fetch and parse a meta4 file to get mirror URLs."""
+        try:
+            log.info("meta4.fetching", url=url)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        log.error("meta4.fetch_failed", status=response.status)
+                        return []
+                    content = await response.text()
+                    root = ET.fromstring(content)
+                    
+                    # Extract mirror URLs from meta4 file
+                    mirrors = []
+                    for url_elem in root.findall(".//{urn:ietf:params:xml:ns:metalink}url"):
+                        mirror_url = url_elem.text
+                        if mirror_url:
+                            mirrors.append(mirror_url)
+                    
+                    log.info("meta4.parsed", mirrors=len(mirrors))
+                    return mirrors
+        except Exception as e:
+            log.error("meta4.fetch_failed", error=str(e))
+            return []
+
+    async def _get_available_content(self) -> List[ContentFile]:
+        """Get list of available content from central library XML."""
+        try:
+            library_root = await self._fetch_library_xml()
+            if not library_root:
+                return []
+
+            content_files = []
+            for book in library_root.findall(".//book"):
+                try:
+                    # Extract basic info
+                    url = book.get("url", "")
+                    if not url or not url.endswith(".meta4"):
+                        continue
+
+                    size = int(book.get("size", 0))
+                    name = book.get("name", "")
+                    date = book.get("date", "")
+                    
+                    # Get mirror URLs from meta4 file
+                    mirrors = await self._fetch_meta4_file(url)
+                    if not mirrors:
+                        log.warning("content.no_mirrors", name=name)
+                        continue
+
+                    # Create ContentFile object
+                    content_file = ContentFile(
+                        name=name,
+                        path=name,
+                        url=mirrors[0],  # Use first mirror as primary URL
+                        size=size,
+                        date=date,
+                        mirrors=mirrors
+                    )
+                    content_files.append(content_file)
+                    
+                except Exception as e:
+                    log.error("content.parse_failed", error=str(e))
+                    continue
+
+            log.info("content_list.complete", count=len(content_files))
+            return content_files
+
+        except Exception as e:
+            log.error("content_list.failed", error=str(e))
+            return []
+
     async def _get_remote_md5(self, url: str) -> Optional[str]:
         """Get MD5 hash from remote .md5 file."""
         try:
@@ -425,7 +405,7 @@ class ContentManager:
                      actual=actual_md5)
         return matches
 
-    async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
+    async def _download_file(self, url: str, dest_path: str, content: ContentItem, mirrors: List[str] = None) -> bool:
         """Download a file with MD5 verification and version management."""
         temp_path = f"{dest_path}.tmp"
         max_retries = self.config.options.retry_attempts
@@ -445,125 +425,126 @@ class ContentManager:
         
         async with self.download_semaphore:
             while retry_count <= max_retries:
-                try:
-                    download_url = url if url.startswith('http') else urljoin(self.base_url, url)
-                    log.info("download.starting", 
-                            content=content.name,
-                            url=download_url,
-                            dest=dest_path,
-                            attempt=retry_count + 1,
-                            max_attempts=max_retries + 1)
-                    
-                    timeout = aiohttp.ClientTimeout(
-                        total=None,
-                        connect=120,
-                        sock_read=600,
-                        sock_connect=60
-                    )
-                    
-                    connector = aiohttp.TCPConnector(
-                        force_close=True,
-                        enable_cleanup_closed=True,
-                        limit=1
-                    )
-                    
-                    async with aiohttp.ClientSession(
-                        timeout=timeout,
-                        connector=connector,
-                        raise_for_status=True
-                    ) as session:
-                        async with session.get(download_url) as response:
-                            if response.status != 200:
-                                raise Exception(f"Download failed: {response.status}")
-                            
-                            total_size = int(response.headers.get('content-length', 0))
-                            downloaded = 0
-                            
-                            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                            
-                            async with aiofiles.open(temp_path, 'wb') as f:
-                                async for chunk in response.content.iter_chunked(1024 * 1024):
-                                    await f.write(chunk)
-                                    downloaded += len(chunk)
-                                    monitoring.update_content_size(
-                                        content.name,
-                                        content.language,
-                                        downloaded
-                                    )
-                                    
-                                    if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:
-                                        progress = (downloaded / total_size) * 100
-                                        log.debug("download.progress",
-                                                content=content.name,
-                                                progress=f"{progress:.1f}%",
-                                                downloaded=downloaded,
-                                                total=total_size)
-                            
-                            # Verify the download using MD5
-                            if await self._verify_download(temp_path, md5_url):
-                                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                                os.rename(temp_path, dest_path)
+                # Try each mirror URL in sequence
+                urls_to_try = [url] + (mirrors or [])
+                for current_url in urls_to_try:
+                    try:
+                        download_url = current_url if current_url.startswith('http') else urljoin(self.base_url, current_url)
+                        log.info("download.starting", 
+                                content=content.name,
+                                url=download_url,
+                                dest=dest_path,
+                                attempt=retry_count + 1,
+                                max_attempts=max_retries + 1)
+                        
+                        timeout = aiohttp.ClientTimeout(
+                            total=None,
+                            connect=120,
+                            sock_read=600,
+                            sock_connect=60
+                        )
+                        
+                        connector = aiohttp.TCPConnector(
+                            force_close=True,
+                            enable_cleanup_closed=True,
+                            limit=1
+                        )
+                        
+                        async with aiohttp.ClientSession(
+                            timeout=timeout,
+                            connector=connector,
+                            raise_for_status=True
+                        ) as session:
+                            async with session.get(download_url) as response:
+                                if response.status != 200:
+                                    raise Exception(f"Download failed: {response.status}")
                                 
-                                # Only remove old files after successful download and verification
-                                for old_file in existing_files:
-                                    if old_file != dest_path:
-                                        try:
-                                            os.remove(old_file)
-                                            log.info("old_version.removed", file=old_file)
-                                        except Exception as e:
-                                            log.error("old_version.remove_failed",
-                                                    file=old_file,
-                                                    error=str(e))
+                                total_size = int(response.headers.get('content-length', 0))
+                                downloaded = 0
                                 
-                                log.info("download.complete",
-                                        content=content.name,
-                                        size=os.path.getsize(dest_path))
+                                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                                
+                                async with aiofiles.open(temp_path, 'wb') as f:
+                                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                                        await f.write(chunk)
+                                        downloaded += len(chunk)
+                                        monitoring.update_content_size(
+                                            content.name,
+                                            content.language,
+                                            downloaded
+                                        )
                                         
-                                monitoring.record_download("success", content.language)
-                                return True
-                            else:
-                                if os.path.exists(temp_path):
-                                    os.remove(temp_path)
-                                raise Exception("MD5 verification failed")
+                                        if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:
+                                            progress = (downloaded / total_size) * 100
+                                            log.debug("download.progress",
+                                                    content=content.name,
+                                                    progress=f"{progress:.1f}%",
+                                                    downloaded=downloaded,
+                                                    total=total_size)
                                 
-                except Exception as e:
-                    error_details = {
-                        'type': type(e).__name__,
-                        'message': str(e),
-                        'traceback': traceback.format_exc()
-                    }
-                    retry_count += 1
-                    if retry_count <= max_retries:
-                        log.warning("download.retry",
-                                  content=content.name,
-                                  error=error_details,
-                                  attempt=retry_count,
-                                  max_attempts=max_retries + 1)
-                        if os.path.exists(temp_path):
-                            try:
-                                os.remove(temp_path)
-                            except Exception as cleanup_error:
-                                log.error("download.cleanup_failed",
-                                        content=content.name,
-                                        error=str(cleanup_error))
-                        await asyncio.sleep(2 ** retry_count)
-                        continue
-                    
-                    log.error("download.failed",
-                             content=content.name,
-                             error=str(e),
-                             attempts=retry_count,
-                             traceback=traceback.format_exc())
-                    monitoring.record_download("failed", content.language)
-                    
-                    if os.path.exists(temp_path):
-                        try:
-                            os.remove(temp_path)
-                        except Exception as cleanup_error:
-                            log.error("download.cleanup_failed",
-                                    content=content.name,
-                                    error=str(cleanup_error))
-                    return False
+                                # Verify the download using MD5
+                                if await self._verify_download(temp_path, md5_url):
+                                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                                    os.rename(temp_path, dest_path)
+                                    
+                                    # Only remove old files after successful download and verification
+                                    for old_file in existing_files:
+                                        if old_file != dest_path:
+                                            try:
+                                                os.remove(old_file)
+                                                log.info("old_version.removed", file=old_file)
+                                            except Exception as e:
+                                                log.error("old_version.remove_failed",
+                                                        file=old_file,
+                                                        error=str(e))
+                                    
+                                    log.info("download.complete",
+                                            content=content.name,
+                                            size=os.path.getsize(dest_path))
+                                            
+                                    monitoring.record_download("success", content.language)
+                                    return True
+                                else:
+                                    if os.path.exists(temp_path):
+                                        os.remove(temp_path)
+                                    continue  # Try next mirror
+                    except Exception as e:
+                        log.error("download.mirror_failed",
+                                content=content.name,
+                                url=current_url,
+                                error=str(e))
+                        continue  # Try next mirror
+                
+                # If we get here, all mirrors failed
+                retry_count += 1
+                if retry_count <= max_retries:
+                    log.warning("download.retry",
+                              content=content.name,
+                              attempt=retry_count,
+                              max_attempts=max_retries + 1)
+                    await asyncio.sleep(2 ** retry_count)
+                    continue
+                
+                log.error("download.all_mirrors_failed",
+                         content=content.name,
+                         attempts=retry_count)
+                monitoring.record_download("failed", content.language)
+                
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception as cleanup_error:
+                        log.error("download.cleanup_failed",
+                                content=content.name,
+                                error=str(cleanup_error))
+                return False
+        except Exception as e:
+            log.error("download.failed",
+                     content=content.name,
+                     error=str(e),
+                     traceback=traceback.format_exc())
+            monitoring.record_download("failed", content.language)
+            return False
     
     async def update_content(self):
         """Update content based on configuration."""
@@ -704,7 +685,8 @@ class ContentManager:
                         download_task = self._download_file(
                             latest_version.url,
                             dest_path,
-                            content_item
+                            content_item,
+                            latest_version.mirrors
                         )
                         download_tasks.append(download_task)
                 else:
