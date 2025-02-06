@@ -13,12 +13,12 @@ aiofiles==23.2.1
 apscheduler==3.10.4
 
 # Logging and monitoring
-structlog==24.1.0
+structlog==25.1.0
 prometheus-client==0.19.0
 
 # Testing dependencies
 pytest==7.4.3
-pytest-asyncio==0.23.2
+pytest-asyncio==0.25.3
 pytest-cov==4.1.0
 responses==0.24.1
 aioresponses==0.7.4 
