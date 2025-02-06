@@ -361,7 +361,7 @@ class ContentManager:
                      actual=actual_md5)
         return matches
 
-    async def _download_file(self, url: str, dest_path: str, content: ContentItem, mirrors: List[str] = None) -> bool:
+    async def _download_file(self, url: str, dest_path: str, content: ContentItem, mirrors: List[str] = None, expected_md5: str = None) -> bool:
         """Download a file with MD5 verification and version management."""
         temp_path = f"{dest_path}.tmp"
         max_retries = self.config.options.retry_attempts
@@ -462,16 +462,15 @@ class ContentManager:
                                                         downloaded=downloaded,
                                                         total=total_size)
                                     
-                                    # Verify MD5 if we have an expected hash
+                                    # Always verify MD5 if provided
+                                    actual_md5 = self._calculate_file_md5(temp_path)
+                                    if not actual_md5:
+                                        log.error("md5_calculate.failed", 
+                                                file=temp_path,
+                                                content=content.name)
+                                        continue
+                                    
                                     if expected_md5:
-                                        actual_md5 = self._calculate_file_md5(temp_path)
-                                        if not actual_md5:
-                                            log.error("md5_calculate.failed", 
-                                                    file=temp_path,
-                                                    content=content.name,
-                                                    expected=expected_md5)
-                                            continue
-                                        
                                         if actual_md5.lower() != expected_md5.lower():
                                             log.error("md5_verify.mismatch",
                                                     file=temp_path,
@@ -488,12 +487,6 @@ class ContentManager:
                                                 md5=actual_md5,
                                                 expected=expected_md5,
                                                 file=temp_path)
-                                    else:
-                                        log.warning("md5_verify.skipped",
-                                                  content=content.name,
-                                                  reason="No meta4 hash available",
-                                                  url=download_url,
-                                                  original_url=url)
                                     
                                     # Move file to final location
                                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -785,7 +778,8 @@ class ContentManager:
                     url,
                     dest_path,
                     content_item,
-                    mirrors[1:] if len(mirrors) > 1 else None  # Rest of mirrors as fallbacks
+                    mirrors[1:] if len(mirrors) > 1 else None,  # Rest of mirrors as fallbacks
+                    md5_hash  # Pass the MD5 hash
                 )
                 
                 if success:

@@ -136,6 +136,9 @@ class WebServer:
             # Queue downloads
             for book in selected_books:
                 await self.content_manager.queue_download(book)
+                log.info("queue.added_book", 
+                        book=book['name'],
+                        size=book.get('size', 0))
             
             return web.Response(text=f"Queued {len(selected_books)} books for download")
             
