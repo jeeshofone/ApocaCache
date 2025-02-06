@@ -348,6 +348,7 @@ class ContentManager:
     async def _get_remote_md5(self, url: str) -> Optional[str]:
         """Get MD5 hash from remote .md5 file."""
         try:
+            log.info("md5_fetch.starting", url=url)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
@@ -362,7 +363,9 @@ class ContentManager:
                         # Extract just the MD5 hash from the text
                         md5_match = re.match(r'^([a-f0-9]{32})\s+', md5_text)
                         if md5_match:
-                            return md5_match.group(1)
+                            md5_hash = md5_match.group(1)
+                            log.info("md5_fetch.success", url=url, md5=md5_hash)
+                            return md5_hash
             
             log.error("md5_parse.failed", url=url, content=content)
             return None
@@ -373,12 +376,15 @@ class ContentManager:
     def _calculate_file_md5(self, filepath: str) -> Optional[str]:
         """Calculate MD5 hash of a file."""
         try:
+            log.info("md5_calculate.starting", filepath=filepath)
             md5_hash = hashlib.md5()
             with open(filepath, "rb") as f:
                 # Read the file in chunks to handle large files
                 for chunk in iter(lambda: f.read(4096), b""):
                     md5_hash.update(chunk)
-            return md5_hash.hexdigest()
+            result = md5_hash.hexdigest()
+            log.info("md5_calculate.complete", filepath=filepath, md5=result)
+            return result
         except Exception as e:
             log.error("md5_calculate.error", filepath=filepath, error=str(e))
             return None
@@ -582,10 +588,6 @@ class ContentManager:
                 latest_date = None
                 
                 # Pattern for matching content files
-                # Handle various formats:
-                # - wikipedia_en_all_maxi_2024-05.zim
-                # - devdocs_en_angular_2025-01.zim
-                # - freecodecamp_en_javascript_2024-10.zim
                 pattern = f"{content_item.name}.*_\\d{{4}}-\\d{{2}}.zim$"
                 log.debug("content_update.pattern", pattern=pattern)
                 
@@ -615,54 +617,96 @@ class ContentManager:
                         filename
                     )
                     
+                    # Get MD5 before proceeding with download decision
+                    remote_md5_url = f"{latest_version.url}.md5"
+                    remote_md5 = await self._get_remote_md5(remote_md5_url)
+                    
+                    if not remote_md5:
+                        log.error("md5_fetch.failed_pre_download",
+                                content=content_item.name,
+                                url=remote_md5_url)
+                        continue
+                        
+                    log.info("md5_fetch.success_pre_download",
+                            content=content_item.name,
+                            md5=remote_md5,
+                            url=remote_md5_url)
+                    
                     # Create state for this content
                     state = {
                         'last_updated': latest_version.date,
                         'size': latest_version.size,
-                        'path': dest_path
+                        'path': dest_path,
+                        'md5': remote_md5
                     }
                     
                     # Update state immediately
                     self.content_state[content_item.name] = state
                     
+                    # Check if we already have a version of this file
+                    dest_dir = os.path.dirname(dest_path)
+                    base_pattern = re.sub(r'_\d{4}-\d{2}\.zim$', '', os.path.basename(dest_path))
+                    existing_files = []
+                    if os.path.exists(dest_dir):
+                        for f in os.listdir(dest_dir):
+                            if f.startswith(base_pattern) and f.endswith('.zim'):
+                                existing_files.append(os.path.join(dest_dir, f))
+                    
                     # Check if download/update needed
-                    if self.config.should_download_content(content_item):
-                        needs_download = not os.path.exists(dest_path)
-                        
-                        # Check both file size and date for updates
-                        current_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
-                        size_mismatch = current_size != latest_version.size
-                        
-                        # Extract date from filename for comparison
-                        date_match = re.search(r'_(\d{4}-\d{2}).zim$', os.path.basename(dest_path)) if os.path.exists(dest_path) else None
-                        file_date = date_match.group(1) if date_match else None
-                        latest_date = re.search(r'_(\d{4}-\d{2}).zim$', latest_version.path).group(1)
-                        date_mismatch = file_date != latest_date if file_date else True
-                        
-                        needs_update = size_mismatch or date_mismatch
-                        
-                        log.info("content_update.download_check",
+                    needs_download = not os.path.exists(dest_path)
+                    
+                    # Check both file size and date for updates
+                    current_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+                    size_mismatch = current_size != latest_version.size
+                    
+                    # Extract date from filename for comparison
+                    date_match = re.search(r'_(\d{4}-\d{2}).zim$', os.path.basename(dest_path)) if os.path.exists(dest_path) else None
+                    file_date = date_match.group(1) if date_match else None
+                    latest_date = re.search(r'_(\d{4}-\d{2}).zim$', latest_version.path).group(1)
+                    date_mismatch = file_date != latest_date if file_date else True
+                    
+                    # Verify MD5 of existing file if it exists
+                    md5_mismatch = False
+                    if os.path.exists(dest_path):
+                        local_md5 = self._calculate_file_md5(dest_path)
+                        if local_md5:
+                            if local_md5 != remote_md5:
+                                log.warning("md5_verify.mismatch_pre_download",
+                                          file=dest_path,
+                                          local_md5=local_md5,
+                                          remote_md5=remote_md5)
+                                md5_mismatch = True
+                            else:
+                                log.info("md5_verify.match_pre_download",
+                                        file=dest_path,
+                                        md5=local_md5)
+                    
+                    needs_update = size_mismatch or date_mismatch or md5_mismatch
+                    
+                    log.info("content_update.download_check",
+                            content_name=content_item.name,
+                            needs_download=needs_download,
+                            needs_update=needs_update,
+                            current_size=current_size,
+                            new_size=latest_version.size,
+                            size_mismatch=size_mismatch,
+                            current_date=file_date,
+                            new_date=latest_date,
+                            date_mismatch=date_mismatch,
+                            md5_mismatch=md5_mismatch)
+                    
+                    if needs_download or needs_update:
+                        log.info("content_update.queueing_download",
                                 content_name=content_item.name,
-                                needs_download=needs_download,
-                                needs_update=needs_update,
-                                current_size=current_size,
-                                new_size=latest_version.size,
-                                size_mismatch=size_mismatch,
-                                current_date=file_date,
-                                new_date=latest_date,
-                                date_mismatch=date_mismatch)
-                        
-                        if needs_download or needs_update:
-                            log.info("content_update.queueing_download",
-                                    content_name=content_item.name,
-                                    filename=filename,
-                                    size=latest_version.size)
-                            download_task = self._download_file(
-                                latest_version.url,
-                                dest_path,
-                                content_item
-                            )
-                            download_tasks.append(download_task)
+                                filename=filename,
+                                size=latest_version.size,
+                                md5=remote_md5)
+                        download_task = self._download_file(
+                            latest_version.url,
+                            dest_path,
+                            content_item
+                        )
+                        download_tasks.append(download_task)
                 else:
                     log.warning("content_update.no_match_found",
                               content_name=content_item.name,
