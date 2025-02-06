@@ -65,7 +65,7 @@ class WebServer:
                 try:
                     book_data = {
                         'id': book.get('id', ''),
-                        'size': int(book.get('size', 0)),
+                        'size': 0,  # Will be updated from meta4
                         'url': book.get('url', ''),
                         'title': book.get('title', ''),
                         'description': book.get('description', ''),
@@ -87,6 +87,21 @@ class WebServer:
             # Update cache
             self.library_cache = books
             self.library_cache_time = now
+            
+            # Update sizes from meta4 files
+            for book in books:
+                if book['url'].endswith('.meta4'):
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(book['url']) as response:
+                                if response.status == 200:
+                                    meta4_content = await response.text()
+                                    meta4_root = ET.fromstring(meta4_content)
+                                    size_elem = meta4_root.find(".//{urn:ietf:params:xml:ns:metalink}file/size")
+                                    if size_elem is not None and size_elem.text:
+                                        book['size'] = int(size_elem.text)
+                    except Exception as e:
+                        log.error("meta4_size_fetch.failed", url=book['url'], error=str(e))
             
             return books
             

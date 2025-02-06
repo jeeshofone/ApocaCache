@@ -166,7 +166,7 @@
                             </h6>
                             <p class="card-text">${book.description || 'No description available'}</p>
                             <div class="d-flex justify-content-between align-items-center">
-                                <span class="book-size">${formatSize(book.size)}</span>
+                                <span class="book-size">${book.size ? formatSize(book.size) : 'Size unknown'}</span>
                                 <button class="btn btn-sm ${selectedBooks.has(book.id) ? 'btn-danger' : 'btn-primary'}"
                                         onclick="toggleBook('${book.id}', event)">
                                     ${selectedBooks.has(book.id) ? 'Remove' : 'Select'}
