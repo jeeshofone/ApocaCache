@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
 from datetime import datetime
 
+from database import DatabaseManager
+
 log = structlog.get_logger()
 
 class WebServer:
@@ -27,6 +29,7 @@ class WebServer:
         self.library_cache = None
         self.library_cache_time = None
         self.cache_ttl = 3600  # 1 hour cache TTL
+        self.db = DatabaseManager(config.data_dir)
         
     def setup_routes(self):
         """Setup web server routes."""
@@ -43,6 +46,56 @@ class WebServer:
         site = web.TCPSite(runner, '0.0.0.0', 3118)
         await site.start()
         log.info("web_server.started", port=3118)
+    
+    async def _parse_meta4_file(self, url: str) -> Dict:
+        """Parse meta4 file to extract size and hash information."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return {}
+                    
+                    content = await response.text()
+                    root = ET.fromstring(content)
+                    
+                    # Extract file information
+                    file_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}file")
+                    if file_elem is None:
+                        return {}
+                    
+                    # Get file name
+                    file_name = file_elem.get("name", "")
+                    
+                    # Get file size
+                    size_elem = file_elem.find(".//{urn:ietf:params:xml:ns:metalink}size")
+                    file_size = int(size_elem.text) if size_elem is not None else 0
+                    
+                    # Get hashes
+                    hashes = {}
+                    for hash_elem in file_elem.findall(".//{urn:ietf:params:xml:ns:metalink}hash"):
+                        hash_type = hash_elem.get("type", "")
+                        if hash_type and hash_elem.text:
+                            hashes[hash_type] = hash_elem.text
+                    
+                    # Get mirrors
+                    mirrors = []
+                    for url_elem in root.findall(".//{urn:ietf:params:xml:ns:metalink}url"):
+                        if url_elem.text:
+                            mirrors.append(url_elem.text)
+                    
+                    return {
+                        "file_name": file_name,
+                        "file_size": file_size,
+                        "md5_hash": hashes.get("md5", ""),
+                        "sha1_hash": hashes.get("sha-1", ""),
+                        "sha256_hash": hashes.get("sha-256", ""),
+                        "mirrors": mirrors,
+                        "meta4_url": url
+                    }
+                    
+        except Exception as e:
+            log.error("meta4_parse.failed", url=url, error=str(e))
+            return {}
     
     async def get_library_xml(self) -> Optional[List[Dict]]:
         """Get the library XML content, using cache if available."""
@@ -65,7 +118,6 @@ class WebServer:
                 try:
                     book_data = {
                         'id': book.get('id', ''),
-                        'size': 0,  # Will be updated from meta4
                         'url': book.get('url', ''),
                         'title': book.get('title', ''),
                         'description': book.get('description', ''),
@@ -79,7 +131,22 @@ class WebServer:
                         'mediaCount': int(book.get('mediaCount', 0)),
                         'articleCount': int(book.get('articleCount', 0))
                     }
+                    
+                    # Check if we have cached meta4 info
+                    meta4_info = self.db.get_meta4_info(book_data['id'])
+                    
+                    if meta4_info:
+                        book_data['size'] = meta4_info['file_size']
+                    else:
+                        # If URL ends with .meta4, fetch and cache the information
+                        if book_data['url'].endswith('.meta4'):
+                            meta4_info = await self._parse_meta4_file(book_data['url'])
+                            if meta4_info:
+                                await self.db.update_meta4_info(book_data['id'], meta4_info)
+                                book_data['size'] = meta4_info['file_size']
+                    
                     books.append(book_data)
+                    
                 except Exception as e:
                     log.error("library_parse.book_failed", error=str(e))
                     continue
@@ -87,21 +154,6 @@ class WebServer:
             # Update cache
             self.library_cache = books
             self.library_cache_time = now
-            
-            # Update sizes from meta4 files
-            for book in books:
-                if book['url'].endswith('.meta4'):
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(book['url']) as response:
-                                if response.status == 200:
-                                    meta4_content = await response.text()
-                                    meta4_root = ET.fromstring(meta4_content)
-                                    size_elem = meta4_root.find(".//{urn:ietf:params:xml:ns:metalink}file/size")
-                                    if size_elem is not None and size_elem.text:
-                                        book['size'] = int(size_elem.text)
-                    except Exception as e:
-                        log.error("meta4_size_fetch.failed", url=book['url'], error=str(e))
             
             return books
             

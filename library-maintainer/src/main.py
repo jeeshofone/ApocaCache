@@ -19,6 +19,7 @@ from content_manager import ContentManager
 from library_manager import LibraryManager
 from web_server import WebServer
 from monitoring import setup_monitoring
+from database import DatabaseManager
 
 # Configure structured logging
 structlog.configure(
@@ -43,6 +44,7 @@ class LibraryMaintainerService:
         self.config = Config()
         self.content_manager = ContentManager(self.config)
         self.library_manager = LibraryManager(self.config)
+        self.db_manager = DatabaseManager(self.config.data_dir)
         self.scheduler = AsyncIOScheduler()
         self.running = False
         self._setup_signal_handlers()
@@ -64,6 +66,8 @@ class LibraryMaintainerService:
             await self.content_manager.update_content()
             # Then update the library catalog
             await self.library_manager.update_library()
+            # Clean up old cache entries
+            self.db_manager.cleanup_old_entries(days=30)
             log.info("update_cycle.complete")
         except Exception as e:
             log.error("update_cycle.failed", error=str(e))
@@ -78,10 +82,20 @@ class LibraryMaintainerService:
         
         # Schedule content updates
         self.scheduler.add_job(
-            self._run_update_cycle,  # New method to handle complete update cycle
+            self._run_update_cycle,
             'cron',
             **self.config.update_schedule
         )
+        
+        # Schedule daily database cleanup
+        self.scheduler.add_job(
+            self.db_manager.cleanup_old_entries,
+            'cron',
+            hour=3,  # Run at 3 AM
+            minute=0,
+            kwargs={'days': 30}
+        )
+        
         self.scheduler.start()
         
         # Initial content update cycle
