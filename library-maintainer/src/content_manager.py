@@ -225,6 +225,16 @@ class ContentManager:
     async def _fetch_library_xml(self) -> Optional[ET.Element]:
         """Fetch and parse the central library XML file."""
         try:
+            # Check for cached local copy first
+            local_library_file = os.path.join(self.config.data_dir, "library_zim.xml")
+            
+            if os.path.exists(local_library_file):
+                log.info("library_xml.using_local_cache", path=local_library_file)
+                async with aiofiles.open(local_library_file, 'r') as f:
+                    content = await f.read()
+                return ET.fromstring(content)
+            
+            # If no local cache, fetch from remote
             log.info("library_xml.fetching", url=self.library_xml_url)
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.library_xml_url) as response:
@@ -232,13 +242,22 @@ class ContentManager:
                         log.error("library_xml.fetch_failed", status=response.status)
                         return None
                     content = await response.text()
+                    
+                    # Cache the XML locally
+                    try:
+                        async with aiofiles.open(local_library_file, 'w') as f:
+                            await f.write(content)
+                        log.info("library_xml.cached", path=local_library_file)
+                    except Exception as e:
+                        log.error("library_xml.cache_failed", error=str(e))
+                    
                     return ET.fromstring(content)
         except Exception as e:
             log.error("library_xml.fetch_failed", error=str(e))
             return None
 
     async def _fetch_meta4_file(self, url: str) -> List[str]:
-        """Fetch and parse a meta4 file to get mirror URLs."""
+        """Fetch and parse a meta4 file to get mirror URLs and MD5."""
         try:
             log.info("meta4.fetching", url=url)
             async with aiohttp.ClientSession() as session:
@@ -262,78 +281,47 @@ class ContentManager:
             log.error("meta4.fetch_failed", error=str(e))
             return []
 
-    async def _get_available_content(self) -> List[ContentFile]:
-        """Get list of available content from central library XML."""
-        try:
-            library_root = await self._fetch_library_xml()
-            if not library_root:
-                return []
-
-            content_files = []
-            for book in library_root.findall(".//book"):
-                try:
-                    # Extract basic info
-                    url = book.get("url", "")
-                    if not url or not url.endswith(".meta4"):
-                        continue
-
-                    size = int(book.get("size", 0))
-                    name = book.get("name", "")
-                    date = book.get("date", "")
-                    
-                    # Get mirror URLs from meta4 file
-                    mirrors = await self._fetch_meta4_file(url)
-                    if not mirrors:
-                        log.warning("content.no_mirrors", name=name)
-                        continue
-
-                    # Create ContentFile object
-                    content_file = ContentFile(
-                        name=name,
-                        path=name,
-                        url=mirrors[0],  # Use first mirror as primary URL
-                        size=size,
-                        date=date,
-                        mirrors=mirrors
-                    )
-                    content_files.append(content_file)
-                    
-                except Exception as e:
-                    log.error("content.parse_failed", error=str(e))
-                    continue
-
-            log.info("content_list.complete", count=len(content_files))
-            return content_files
-
-        except Exception as e:
-            log.error("content_list.failed", error=str(e))
-            return []
-
     async def _get_remote_md5(self, url: str) -> Optional[str]:
-        """Get MD5 hash from remote .md5 file."""
+        """Get MD5 hash from remote .md5 file or meta4 file."""
         try:
-            # Ensure we're using the correct MD5 URL format
-            md5_url = f"{url}.md5" if not url.endswith('.md5') else url
-            log.info("md5_fetch.starting", url=md5_url)
+            if url.endswith('.meta4'):
+                # Extract MD5 from meta4 file
+                mirrors = await self._fetch_meta4_file(url)
+                if not mirrors:
+                    return None
+                
+                # Get the first mirror's MD5
+                meta4_content = None
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status != 200:
+                            return None
+                        meta4_content = await response.text()
+                
+                if meta4_content:
+                    root = ET.fromstring(meta4_content)
+                    hash_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}hash[@type='md5']")
+                    if hash_elem is not None and hash_elem.text:
+                        return hash_elem.text
+            else:
+                # Use traditional .md5 file
+                md5_url = f"{url}.md5" if not url.endswith('.md5') else url
+                log.info("md5_fetch.starting", url=md5_url)
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(md5_url) as response:
+                        if response.status != 200:
+                            log.error("md5_fetch.failed", url=md5_url, status=response.status)
+                            return None
+                        
+                        content = await response.text()
+                        md5_match = re.match(r'^([a-f0-9]{32})\s+', content.strip())
+                        if md5_match:
+                            return md5_match.group(1)
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(md5_url) as response:
-                    if response.status != 200:
-                        log.error("md5_fetch.failed", url=md5_url, status=response.status)
-                        return None
-                    
-                    content = await response.text()
-                    # Parse the MD5 from the response
-                    md5_match = re.match(r'^([a-f0-9]{32})\s+', content.strip())
-                    if md5_match:
-                        md5_hash = md5_match.group(1)
-                        log.info("md5_fetch.success", url=md5_url, md5=md5_hash)
-                        return md5_hash
-            
-            log.error("md5_parse.failed", url=md5_url, content=content)
             return None
         except Exception as e:
-            log.error("md5_fetch.error", url=md5_url, error=str(e))
+            log.error("md5_fetch.error", url=url, error=str(e))
             return None
 
     def _calculate_file_md5(self, filepath: str) -> Optional[str]:
@@ -794,3 +782,51 @@ class ContentManager:
             }
             for name in self.active_downloads
         ] 
+
+    async def _get_available_content(self) -> List[ContentFile]:
+        """Get list of available content from central library XML."""
+        try:
+            library_root = await self._fetch_library_xml()
+            if not library_root:
+                return []
+
+            content_files = []
+            for book in library_root.findall(".//book"):
+                try:
+                    # Extract basic info
+                    url = book.get("url", "")
+                    if not url or not url.endswith(".meta4"):
+                        continue
+
+                    size = int(book.get("size", 0))
+                    name = book.get("name", "")
+                    date = book.get("date", "")
+                    
+                    # Get mirror URLs and MD5 from meta4 file
+                    mirrors = await self._fetch_meta4_file(url)
+                    if not mirrors:
+                        log.warning("content.no_mirrors", name=name)
+                        continue
+
+                    # Create ContentFile object
+                    content_file = ContentFile(
+                        name=name,
+                        path=name,
+                        url=url,  # Store meta4 URL as primary URL
+                        size=size,
+                        date=date,
+                        mirrors=mirrors,
+                        md5_url=url  # Use meta4 file for MD5 verification
+                    )
+                    content_files.append(content_file)
+                    
+                except Exception as e:
+                    log.error("content.parse_failed", error=str(e))
+                    continue
+
+            log.info("content_list.complete", count=len(content_files))
+            return content_files
+
+        except Exception as e:
+            log.error("content_list.failed", error=str(e))
+            return [] 
