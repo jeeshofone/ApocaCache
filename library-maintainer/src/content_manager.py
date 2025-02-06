@@ -378,6 +378,8 @@ class ContentManager:
                       md5=meta4_md5)
                 expected_md5 = meta4_md5
                 mirrors = meta4_mirrors if meta4_mirrors else mirrors
+                # Remove .meta4 extension from original URL for direct download
+                url = url[:-6]
         
         # Check if we already have a version of this file
         dest_dir = os.path.dirname(dest_path)
@@ -402,6 +404,10 @@ class ContentManager:
                     
                     for current_url in urls_to_try:
                         try:
+                            # Remove any .meta4 extension from mirror URLs
+                            if current_url.endswith('.meta4'):
+                                current_url = current_url[:-6]
+                            
                             download_url = current_url if current_url.startswith('http') else urljoin(self.base_url, current_url)
                             log.info("download.starting", 
                                     content=content.name,
@@ -462,7 +468,8 @@ class ContentManager:
                                         if not actual_md5:
                                             log.error("md5_calculate.failed", 
                                                     file=temp_path,
-                                                    content=content.name)
+                                                    content=content.name,
+                                                    expected=expected_md5)
                                             continue
                                         
                                         if actual_md5.lower() != expected_md5.lower():
@@ -470,7 +477,8 @@ class ContentManager:
                                                     file=temp_path,
                                                     expected=expected_md5,
                                                     actual=actual_md5,
-                                                    content=content.name)
+                                                    content=content.name,
+                                                    url=download_url)
                                             if os.path.exists(temp_path):
                                                 os.remove(temp_path)
                                             continue
@@ -478,12 +486,14 @@ class ContentManager:
                                         log.info("md5_verify.success",
                                                 content=content.name,
                                                 md5=actual_md5,
+                                                expected=expected_md5,
                                                 file=temp_path)
                                     else:
                                         log.warning("md5_verify.skipped",
                                                   content=content.name,
                                                   reason="No meta4 hash available",
-                                                  url=download_url)
+                                                  url=download_url,
+                                                  original_url=url)
                                     
                                     # Move file to final location
                                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
