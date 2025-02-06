@@ -158,3 +158,6 @@ User successfully tested the improved MD5 verification handling. The system now 
 Fri Feb  7 00:39:26 AEDT 2025
 ## MD5 Verification Update
 User requested removal of .md5 file fallback verification. System now exclusively uses meta4 file MD5 hashes for verification.
+Fri Feb  7 00:42:46 AEDT 2025
+## MD5 Verification Bug Fix
+Fixed issue where MD5 verification was being skipped even when meta4 hash was available. Improved verification logic and logging.

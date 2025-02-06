@@ -367,6 +367,15 @@ class ContentManager:
         max_retries = self.config.options.retry_attempts
         retry_count = 0
         
+        # Get MD5 from meta4 file if available
+        expected_md5 = None
+        if url.endswith('.meta4'):
+            expected_md5 = await self._get_remote_md5(url)
+            if not expected_md5:
+                log.warning("md5_verify.no_hash_available", 
+                          content=content.name,
+                          url=url)
+        
         # Check if we already have a version of this file
         dest_dir = os.path.dirname(dest_path)
         base_pattern = re.sub(r'_\d{4}-\d{2}\.zim$', '', os.path.basename(dest_path))
@@ -390,15 +399,6 @@ class ContentManager:
                                     dest=dest_path,
                                     attempt=retry_count + 1,
                                     max_attempts=max_retries + 1)
-                            
-                            # Get MD5 from meta4 file if available
-                            expected_md5 = None
-                            if url.endswith('.meta4'):
-                                expected_md5 = await self._get_remote_md5(url)
-                                if not expected_md5:
-                                    log.warning("md5_verify.no_hash_available", 
-                                              content=content.name,
-                                              url=download_url)
                             
                             timeout = aiohttp.ClientTimeout(
                                 total=None,
@@ -460,6 +460,10 @@ class ContentManager:
                                             if os.path.exists(temp_path):
                                                 os.remove(temp_path)
                                             continue
+                                        
+                                        log.info("md5_verify.success",
+                                                content=content.name,
+                                                md5=actual_md5)
                                     else:
                                         log.warning("md5_verify.skipped",
                                                   content=content.name,

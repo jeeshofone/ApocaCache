@@ -183,3 +183,13 @@ Fri Feb  7 00:39:19 AEDT 2025
 1. Monitor system performance with meta4-only verification
 2. Consider implementing additional integrity checks for non-meta4 downloads
 3. Update documentation to reflect meta4-only verification
+Fri Feb  7 00:42:40 AEDT 2025
+## Bug Fix
+- Fixed MD5 verification logic to properly use meta4 hashes
+- Moved MD5 hash extraction outside the mirror loop
+- Added success logging for MD5 verification
+
+## Next Steps
+1. Test MD5 verification with various meta4 files
+2. Monitor verification success rates
+3. Consider adding retry logic for meta4 file fetching
