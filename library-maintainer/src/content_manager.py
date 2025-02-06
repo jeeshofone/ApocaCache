@@ -9,6 +9,7 @@ import time
 import json
 from datetime import datetime
 import re
+import hashlib
 from typing import Dict, List, Optional, Tuple
 import aiohttp
 import aiofiles
@@ -33,6 +34,7 @@ class ContentFile:
     url: str
     size: int
     date: str
+    md5_url: str = ""
 
 class ApacheDirectoryParser:
     """Parser for Apache's default directory listing format."""
@@ -343,26 +345,101 @@ class ContentManager:
                      traceback=traceback.format_exc())
             raise
     
-    async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
-        """
-        Download a file with progress tracking, verification and retries.
-        
-        Args:
-            url: The URL to download from (can be relative or absolute)
-            dest_path: The destination path to save the file
-            content: The content item being downloaded
+    async def _get_remote_md5(self, url: str) -> Optional[str]:
+        """Get MD5 hash from remote .md5 file."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        log.error("md5_fetch.failed", url=url, status=response.status)
+                        return None
+                    
+                    content = await response.text()
+                    # Parse the MD5 from the HTML response
+                    soup = BeautifulSoup(content, 'html.parser')
+                    md5_text = soup.get_text().strip()
+                    if md5_text:
+                        # Extract just the MD5 hash from the text
+                        md5_match = re.match(r'^([a-f0-9]{32})\s+', md5_text)
+                        if md5_match:
+                            return md5_match.group(1)
             
-        Returns:
-            bool: True if download was successful, False otherwise
-        """
+            log.error("md5_parse.failed", url=url, content=content)
+            return None
+        except Exception as e:
+            log.error("md5_fetch.error", url=url, error=str(e))
+            return None
+
+    def _calculate_file_md5(self, filepath: str) -> Optional[str]:
+        """Calculate MD5 hash of a file."""
+        try:
+            md5_hash = hashlib.md5()
+            with open(filepath, "rb") as f:
+                # Read the file in chunks to handle large files
+                for chunk in iter(lambda: f.read(4096), b""):
+                    md5_hash.update(chunk)
+            return md5_hash.hexdigest()
+        except Exception as e:
+            log.error("md5_calculate.error", filepath=filepath, error=str(e))
+            return None
+
+    def _compare_versions(self, current_version: str, new_version: str) -> bool:
+        """Compare version strings to determine if new version is newer.
+        Returns True if new_version is newer than current_version."""
+        try:
+            current_date = datetime.strptime(current_version, "%Y-%m")
+            new_date = datetime.strptime(new_version, "%Y-%m")
+            return new_date > current_date
+        except ValueError:
+            log.error("version_compare.error", 
+                     current=current_version, 
+                     new=new_version)
+            return False
+
+    def _extract_version_from_filename(self, filename: str) -> Optional[str]:
+        """Extract version (YYYY-MM) from filename."""
+        match = re.search(r'_(\d{4}-\d{2})\.zim$', filename)
+        return match.group(1) if match else None
+
+    async def _verify_download(self, filepath: str, md5_url: str) -> bool:
+        """Verify downloaded file using MD5."""
+        expected_md5 = await self._get_remote_md5(md5_url)
+        if not expected_md5:
+            return False
+            
+        actual_md5 = self._calculate_file_md5(filepath)
+        if not actual_md5:
+            return False
+            
+        matches = expected_md5.lower() == actual_md5.lower()
+        if not matches:
+            log.error("md5_verify.mismatch",
+                     filepath=filepath,
+                     expected=expected_md5,
+                     actual=actual_md5)
+        return matches
+
+    async def _download_file(self, url: str, dest_path: str, content: ContentItem) -> bool:
+        """Download a file with MD5 verification and version management."""
         temp_path = f"{dest_path}.tmp"
         max_retries = self.config.options.retry_attempts
         retry_count = 0
         
+        # Get MD5 URL
+        md5_url = f"{url}.md5"
+        
+        # Check if we already have a version of this file
+        dest_dir = os.path.dirname(dest_path)
+        base_pattern = re.sub(r'_\d{4}-\d{2}\.zim$', '', os.path.basename(dest_path))
+        existing_files = []
+        if os.path.exists(dest_dir):
+            for f in os.listdir(dest_dir):
+                if f.startswith(base_pattern) and f.endswith('.zim'):
+                    existing_files.append(os.path.join(dest_dir, f))
+        
         async with self.download_semaphore:
             while retry_count <= max_retries:
                 try:
-                    # Ensure URL is absolute
                     download_url = url if url.startswith('http') else urljoin(self.base_url, url)
                     log.info("download.starting", 
                             content=content.name,
@@ -371,18 +448,17 @@ class ContentManager:
                             attempt=retry_count + 1,
                             max_attempts=max_retries + 1)
                     
-                    # Configure timeouts for large downloads
                     timeout = aiohttp.ClientTimeout(
-                        total=None,  # No total timeout
-                        connect=120,  # 2 minutes to establish connection
-                        sock_read=600,  # 10 minutes to read data chunks
-                        sock_connect=60  # 1 minute for socket connection
+                        total=None,
+                        connect=120,
+                        sock_read=600,
+                        sock_connect=60
                     )
                     
                     connector = aiohttp.TCPConnector(
                         force_close=True,
                         enable_cleanup_closed=True,
-                        limit=1  # Limit concurrent connections per session
+                        limit=1
                     )
                     
                     async with aiohttp.ClientSession(
@@ -390,51 +466,48 @@ class ContentManager:
                         connector=connector,
                         raise_for_status=True
                     ) as session:
-                        try:
-                            async with session.get(download_url) as response:
-                                if response.status != 200:
-                                    raise Exception(f"Download failed: {response.status}")
-                                
-                                total_size = int(response.headers.get('content-length', 0))
-                                if total_size == 0:
-                                    log.warning("download.no_content_length",
-                                              content=content.name,
-                                              url=download_url)
-                                
-                                downloaded = 0
-                                
-                                # Create parent directory if it doesn't exist
-                                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                                
-                                async with aiofiles.open(temp_path, 'wb') as f:
-                                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
-                                        await f.write(chunk)
-                                        downloaded += len(chunk)
-                                        monitoring.update_content_size(
-                                            content.name,
-                                            content.language,
-                                            downloaded
-                                        )
-                                
-                                # Log progress for large files
-                                if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:  # Every 10MB
-                                    progress = (downloaded / total_size) * 100
-                                    log.debug("download.progress",
-                                            content=content.name,
-                                            progress=f"{progress:.1f}%",
-                                            downloaded=downloaded,
-                                            total=total_size)
-                                
-                                if self.config.options.verify_downloads:
-                                    # Verify download size if we know the expected size
-                                    if total_size > 0 and os.path.getsize(temp_path) != total_size:
-                                        raise Exception(f"Download size mismatch: expected {total_size}, got {os.path.getsize(temp_path)}")
-                                
-                                # Create parent directory if it doesn't exist
+                        async with session.get(download_url) as response:
+                            if response.status != 200:
+                                raise Exception(f"Download failed: {response.status}")
+                            
+                            total_size = int(response.headers.get('content-length', 0))
+                            downloaded = 0
+                            
+                            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                            
+                            async with aiofiles.open(temp_path, 'wb') as f:
+                                async for chunk in response.content.iter_chunked(1024 * 1024):
+                                    await f.write(chunk)
+                                    downloaded += len(chunk)
+                                    monitoring.update_content_size(
+                                        content.name,
+                                        content.language,
+                                        downloaded
+                                    )
+                                    
+                                    if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:
+                                        progress = (downloaded / total_size) * 100
+                                        log.debug("download.progress",
+                                                content=content.name,
+                                                progress=f"{progress:.1f}%",
+                                                downloaded=downloaded,
+                                                total=total_size)
+                            
+                            # Verify the download using MD5
+                            if await self._verify_download(temp_path, md5_url):
                                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                                
-                                # Atomic rename
                                 os.rename(temp_path, dest_path)
+                                
+                                # Only remove old files after successful download and verification
+                                for old_file in existing_files:
+                                    if old_file != dest_path:
+                                        try:
+                                            os.remove(old_file)
+                                            log.info("old_version.removed", file=old_file)
+                                        except Exception as e:
+                                            log.error("old_version.remove_failed",
+                                                    file=old_file,
+                                                    error=str(e))
                                 
                                 log.info("download.complete",
                                         content=content.name,
@@ -442,45 +515,11 @@ class ContentManager:
                                         
                                 monitoring.record_download("success", content.language)
                                 return True
-                        except Exception as e:
-                            error_details = {
-                                'type': type(e).__name__,
-                                'message': str(e),
-                                'traceback': traceback.format_exc()
-                            }
-                            retry_count += 1
-                            if retry_count <= max_retries:
-                                log.warning("download.retry",
-                                          content=content.name,
-                                          error=error_details,
-                                          attempt=retry_count,
-                                          max_attempts=max_retries + 1)
-                        # Clean up failed temp file before retry
-                        if os.path.exists(temp_path):
-                            try:
-                                os.remove(temp_path)
-                            except Exception as cleanup_error:
-                                log.error("download.cleanup_failed",
-                                        content=content.name,
-                                        error=str(cleanup_error))
-                        # Wait before retry with exponential backoff
-                        await asyncio.sleep(2 ** retry_count)
-                        continue
-                    
-                    # All retries exhausted
-                    log.error("download.failed",
-                             content=content.name,
-                             attempts=retry_count)
-                    monitoring.record_download("failed", content.language)
-                    
-                    if os.path.exists(temp_path):
-                        try:
-                            os.remove(temp_path)
-                        except Exception as cleanup_error:
-                            log.error("download.cleanup_failed",
-                                    content=content.name,
-                                    error=str(cleanup_error))
-                    return False
+                            else:
+                                if os.path.exists(temp_path):
+                                    os.remove(temp_path)
+                                raise Exception("MD5 verification failed")
+                                
                 except Exception as e:
                     error_details = {
                         'type': type(e).__name__,
@@ -494,7 +533,6 @@ class ContentManager:
                                   error=error_details,
                                   attempt=retry_count,
                                   max_attempts=max_retries + 1)
-                        # Clean up failed temp file before retry
                         if os.path.exists(temp_path):
                             try:
                                 os.remove(temp_path)
@@ -502,11 +540,9 @@ class ContentManager:
                                 log.error("download.cleanup_failed",
                                         content=content.name,
                                         error=str(cleanup_error))
-                        # Wait before retry with exponential backoff
                         await asyncio.sleep(2 ** retry_count)
                         continue
                     
-                    # All retries exhausted
                     log.error("download.failed",
                              content=content.name,
                              error=str(e),
