@@ -149,4 +149,6 @@ Created detailed documentation for the library maintainer component, including:
 ### User Queries
 2025-02-02: User requested to change Kiwix server port from 8080 to 3119 to avoid port conflicts
 2025-02-02: User requested to fix content state update issue in test_update_content
-2023-10-27: User asked 'what does the kiwix-serve do?' 
+2023-10-27: User asked 'what does the kiwix-serve do?' Fri Feb  7 00:33:30 AEDT 2025
+## Docker Compose English All Startup
+User attempted to start the English-All configuration with docker compose but encountered download issues with Stack Exchange content.

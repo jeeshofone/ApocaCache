@@ -153,4 +153,13 @@ Next steps:
 
 # First Run Experience Improvements
 - [x] Created a default library file in `examples/kiwix/library.xml` with a default Wikipedia zim entry.
-- [x] Updated `README.md` with a 'First Run Setup' section detailing how the project works out-of-the-box. 
+- [x] Updated `README.md` with a 'First Run Setup' section detailing how the project works out-of-the-box. Fri Feb  7 00:33:39 AEDT 2025
+## Issues Identified
+- Stack Exchange content download failing due to MD5 verification issues
+- Mirror sites not properly providing MD5 files
+- Need to implement better error handling for MD5 verification
+
+## Next Steps
+1. Modify content_manager.py to handle missing MD5 files more gracefully
+2. Add fallback verification methods
+3. Implement better mirror selection logic
