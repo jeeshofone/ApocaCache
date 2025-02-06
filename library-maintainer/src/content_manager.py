@@ -423,121 +423,122 @@ class ContentManager:
                 if f.startswith(base_pattern) and f.endswith('.zim'):
                     existing_files.append(os.path.join(dest_dir, f))
         
-        async with self.download_semaphore:
-            while retry_count <= max_retries:
-                # Try each mirror URL in sequence
-                urls_to_try = [url] + (mirrors or [])
-                for current_url in urls_to_try:
-                    try:
-                        download_url = current_url if current_url.startswith('http') else urljoin(self.base_url, current_url)
-                        log.info("download.starting", 
-                                content=content.name,
-                                url=download_url,
-                                dest=dest_path,
-                                attempt=retry_count + 1,
-                                max_attempts=max_retries + 1)
-                        
-                        timeout = aiohttp.ClientTimeout(
-                            total=None,
-                            connect=120,
-                            sock_read=600,
-                            sock_connect=60
-                        )
-                        
-                        connector = aiohttp.TCPConnector(
-                            force_close=True,
-                            enable_cleanup_closed=True,
-                            limit=1
-                        )
-                        
-                        async with aiohttp.ClientSession(
-                            timeout=timeout,
-                            connector=connector,
-                            raise_for_status=True
-                        ) as session:
-                            async with session.get(download_url) as response:
-                                if response.status != 200:
-                                    raise Exception(f"Download failed: {response.status}")
-                                
-                                total_size = int(response.headers.get('content-length', 0))
-                                downloaded = 0
-                                
-                                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                                
-                                async with aiofiles.open(temp_path, 'wb') as f:
-                                    async for chunk in response.content.iter_chunked(1024 * 1024):
-                                        await f.write(chunk)
-                                        downloaded += len(chunk)
-                                        monitoring.update_content_size(
-                                            content.name,
-                                            content.language,
-                                            downloaded
-                                        )
-                                        
-                                        if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:
-                                            progress = (downloaded / total_size) * 100
-                                            log.debug("download.progress",
-                                                    content=content.name,
-                                                    progress=f"{progress:.1f}%",
-                                                    downloaded=downloaded,
-                                                    total=total_size)
-                                
-                                # Verify the download using MD5
-                                if await self._verify_download(temp_path, md5_url):
-                                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                                    os.rename(temp_path, dest_path)
+        try:
+            async with self.download_semaphore:
+                while retry_count <= max_retries:
+                    # Try each mirror URL in sequence
+                    urls_to_try = [url] + (mirrors or [])
+                    for current_url in urls_to_try:
+                        try:
+                            download_url = current_url if current_url.startswith('http') else urljoin(self.base_url, current_url)
+                            log.info("download.starting", 
+                                    content=content.name,
+                                    url=download_url,
+                                    dest=dest_path,
+                                    attempt=retry_count + 1,
+                                    max_attempts=max_retries + 1)
+                            
+                            timeout = aiohttp.ClientTimeout(
+                                total=None,
+                                connect=120,
+                                sock_read=600,
+                                sock_connect=60
+                            )
+                            
+                            connector = aiohttp.TCPConnector(
+                                force_close=True,
+                                enable_cleanup_closed=True,
+                                limit=1
+                            )
+                            
+                            async with aiohttp.ClientSession(
+                                timeout=timeout,
+                                connector=connector,
+                                raise_for_status=True
+                            ) as session:
+                                async with session.get(download_url) as response:
+                                    if response.status != 200:
+                                        raise Exception(f"Download failed: {response.status}")
                                     
-                                    # Only remove old files after successful download and verification
-                                    for old_file in existing_files:
-                                        if old_file != dest_path:
-                                            try:
-                                                os.remove(old_file)
-                                                log.info("old_version.removed", file=old_file)
-                                            except Exception as e:
-                                                log.error("old_version.remove_failed",
-                                                        file=old_file,
-                                                        error=str(e))
+                                    total_size = int(response.headers.get('content-length', 0))
+                                    downloaded = 0
                                     
-                                    log.info("download.complete",
-                                            content=content.name,
-                                            size=os.path.getsize(dest_path))
+                                    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                                    
+                                    async with aiofiles.open(temp_path, 'wb') as f:
+                                        async for chunk in response.content.iter_chunked(1024 * 1024):
+                                            await f.write(chunk)
+                                            downloaded += len(chunk)
+                                            monitoring.update_content_size(
+                                                content.name,
+                                                content.language,
+                                                downloaded
+                                            )
                                             
-                                    monitoring.record_download("success", content.language)
-                                    return True
-                                else:
-                                    if os.path.exists(temp_path):
-                                        os.remove(temp_path)
-                                    continue  # Try next mirror
-                    except Exception as e:
-                        log.error("download.mirror_failed",
-                                content=content.name,
-                                url=current_url,
-                                error=str(e))
-                        continue  # Try next mirror
-                
-                # If we get here, all mirrors failed
-                retry_count += 1
-                if retry_count <= max_retries:
-                    log.warning("download.retry",
-                              content=content.name,
-                              attempt=retry_count,
-                              max_attempts=max_retries + 1)
-                    await asyncio.sleep(2 ** retry_count)
-                    continue
-                
-                log.error("download.all_mirrors_failed",
-                         content=content.name,
-                         attempts=retry_count)
-                monitoring.record_download("failed", content.language)
-                
-                if os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except Exception as cleanup_error:
-                        log.error("download.cleanup_failed",
-                                content=content.name,
-                                error=str(cleanup_error))
-                return False
+                                            if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:
+                                                progress = (downloaded / total_size) * 100
+                                                log.debug("download.progress",
+                                                        content=content.name,
+                                                        progress=f"{progress:.1f}%",
+                                                        downloaded=downloaded,
+                                                        total=total_size)
+                                    
+                                    # Verify the download using MD5
+                                    if await self._verify_download(temp_path, md5_url):
+                                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                                        os.rename(temp_path, dest_path)
+                                        
+                                        # Only remove old files after successful download and verification
+                                        for old_file in existing_files:
+                                            if old_file != dest_path:
+                                                try:
+                                                    os.remove(old_file)
+                                                    log.info("old_version.removed", file=old_file)
+                                                except Exception as e:
+                                                    log.error("old_version.remove_failed",
+                                                            file=old_file,
+                                                            error=str(e))
+                                        
+                                        log.info("download.complete",
+                                                content=content.name,
+                                                size=os.path.getsize(dest_path))
+                                                
+                                        monitoring.record_download("success", content.language)
+                                        return True
+                                    else:
+                                        if os.path.exists(temp_path):
+                                            os.remove(temp_path)
+                                        continue  # Try next mirror
+                        except Exception as e:
+                            log.error("download.mirror_failed",
+                                    content=content.name,
+                                    url=current_url,
+                                    error=str(e))
+                            continue  # Try next mirror
+                    
+                    # If we get here, all mirrors failed
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        log.warning("download.retry",
+                                  content=content.name,
+                                  attempt=retry_count,
+                                  max_attempts=max_retries + 1)
+                        await asyncio.sleep(2 ** retry_count)
+                        continue
+                    
+                    log.error("download.all_mirrors_failed",
+                             content=content.name,
+                             attempts=retry_count)
+                    monitoring.record_download("failed", content.language)
+                    
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception as cleanup_error:
+                            log.error("download.cleanup_failed",
+                                    content=content.name,
+                                    error=str(cleanup_error))
+                    return False
         except Exception as e:
             log.error("download.failed",
                      content=content.name,
