@@ -259,15 +259,20 @@ class ContentManager:
             log.error("library_xml.fetch_failed", error=str(e))
             return None
 
-    async def _fetch_meta4_file(self, url: str) -> List[str]:
-        """Fetch and parse a meta4 file to get mirror URLs and MD5."""
+    async def _fetch_meta4_file(self, url: str) -> Tuple[List[str], Optional[str]]:
+        """
+        Fetch and parse a meta4 file to get mirror URLs and MD5.
+        
+        Returns:
+            Tuple of (mirror_urls, md5_hash)
+        """
         try:
             log.info("meta4.fetching", url=url)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
                         log.error("meta4.fetch_failed", status=response.status)
-                        return []
+                        return [], None
                     content = await response.text()
                     root = ET.fromstring(content)
                     
@@ -278,34 +283,27 @@ class ContentManager:
                         if mirror_url:
                             mirrors.append(mirror_url)
                     
-                    log.info("meta4.parsed", mirrors=len(mirrors))
-                    return mirrors
+                    # Extract MD5 hash
+                    md5_hash = None
+                    hash_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}hash[@type='md5']")
+                    if hash_elem is not None and hash_elem.text:
+                        md5_hash = hash_elem.text
+                    
+                    log.info("meta4.parsed", mirrors=len(mirrors), md5=md5_hash)
+                    return mirrors, md5_hash
         except Exception as e:
             log.error("meta4.fetch_failed", error=str(e))
-            return []
+            return [], None
 
     async def _get_remote_md5(self, url: str) -> Optional[str]:
         """Get MD5 hash from remote .md5 file or meta4 file."""
         try:
             if url.endswith('.meta4'):
                 # Extract MD5 from meta4 file
-                mirrors = await self._fetch_meta4_file(url)
-                if not mirrors:
-                    return None
-                
-                # Get the first mirror's MD5
-                meta4_content = None
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        if response.status != 200:
-                            return None
-                        meta4_content = await response.text()
-                
-                if meta4_content:
-                    root = ET.fromstring(meta4_content)
-                    hash_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}hash[@type='md5']")
-                    if hash_elem is not None and hash_elem.text:
-                        return hash_elem.text
+                mirrors, md5_hash = await self._fetch_meta4_file(url)
+                if md5_hash:
+                    log.info("md5_fetch.from_meta4", url=url, md5=md5_hash)
+                    return md5_hash
             else:
                 # Use traditional .md5 file
                 md5_url = f"{url}.md5" if not url.endswith('.md5') else url
@@ -320,7 +318,9 @@ class ContentManager:
                         content = await response.text()
                         md5_match = re.match(r'^([a-f0-9]{32})\s+', content.strip())
                         if md5_match:
-                            return md5_match.group(1)
+                            md5_hash = md5_match.group(1)
+                            log.info("md5_fetch.from_md5", url=md5_url, md5=md5_hash)
+                            return md5_hash
             
             return None
         except Exception as e:
@@ -733,10 +733,55 @@ class ContentManager:
                 category=book.get('creator', 'unknown')
             )
             
-            # Add to queue
-            await self.download_queue.put((book, content_item))
-            log.info("download.queued", book=book['name'])
+            # Get mirror URLs and MD5 from meta4 file if available
+            mirrors = []
+            md5_hash = None
+            if book['url'].endswith('.meta4'):
+                mirrors, md5_hash = await self._fetch_meta4_file(book['url'])
+                if not mirrors:
+                    log.error("download_worker.no_mirrors", book=book['name'])
+                    return
+                
+                log.info("download_worker.meta4_parsed",
+                        book=book['name'],
+                        mirrors=len(mirrors),
+                        md5=md5_hash)
             
+            # Use first mirror as primary URL
+            url = mirrors[0] if mirrors else book['url']
+            
+            # Create category subdirectory
+            category_dir = os.path.join(self.config.data_dir, content_item.category)
+            os.makedirs(category_dir, exist_ok=True)
+            
+            # Determine destination path
+            filename = os.path.basename(url)
+            if not filename.endswith('.zim'):
+                filename = f"{book['name']}.zim"
+            
+            dest_path = os.path.join(category_dir, filename)
+            
+            # Add to active downloads
+            self.active_downloads.add(book['name'])
+            
+            try:
+                # Download the file
+                success = await self._download_file(
+                    url,
+                    dest_path,
+                    content_item,
+                    mirrors[1:] if len(mirrors) > 1 else None  # Rest of mirrors as fallbacks
+                )
+                
+                if success:
+                    log.info("download_worker.success", book=book['name'])
+                else:
+                    log.error("download_worker.failed", book=book['name'])
+                    
+            finally:
+                # Remove from active downloads
+                self.active_downloads.discard(book['name'])
+                
         except Exception as e:
             log.error("queue_download.failed", error=str(e))
             raise
@@ -826,10 +871,15 @@ class ContentManager:
                     date = book.get("date", "")
                     
                     # Get mirror URLs and MD5 from meta4 file
-                    mirrors = await self._fetch_meta4_file(url)
+                    mirrors, md5_hash = await self._fetch_meta4_file(url)
                     if not mirrors:
                         log.warning("content.no_mirrors", name=name)
                         continue
+
+                    log.info("content.meta4_parsed",
+                            name=name,
+                            mirrors=len(mirrors),
+                            md5=md5_hash)
 
                     # Create ContentFile object
                     content_file = ContentFile(
