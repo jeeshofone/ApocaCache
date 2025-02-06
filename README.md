@@ -161,44 +161,25 @@ This project enables you to:
 
 Think of it as your "knowledge bunker" - always ready, always accessible, regardless of what happens to the broader internet infrastructure.
 
-## Project Status (2025-02-06)
-All integration tests are now passing with improved stability. The library maintainer component has been enhanced with better file matching logic, content state management, proper permission handling, and improved MD5 verification.
+## Project Status (2025-02-07)
 
-### Components
-- **Library Maintainer**: Manages ZIM file downloads and library.xml generation
-  - Content state management with atomic updates
-  - Concurrent downloads with semaphore control
-  - Progress tracking and monitoring
-  - Enhanced file matching logic
-  - Improved error handling
-  - Proper permission handling with configurable UID/GID
-  - Enhanced MD5 verification system
-    - Pre-download MD5 verification
-    - Detailed verification logging
-    - MD5 state tracking
-    - Improved integrity checks
-  - Detailed verification logging
-
-### Recent Achievements
-- Implemented comprehensive MD5 verification system
-  - Added pre-download MD5 checks
-  - Enhanced MD5 state tracking
+### Latest Updates
+- Enhanced MD5 verification system
+  - Proper meta4 file hash extraction
   - Improved verification logging
-- Enhanced download integrity checks
-- Fixed content state update mechanism
-- Improved file matching logic
-- Enhanced logging and error handling
-- All integration tests passing
-- Verified concurrent download functionality
-- Confirmed atomic state updates
-- Added proper permission handling with configurable UID/GID
+  - Fixed verification skipping issue
+- Successful testing of English-all configuration
+- Verified container orchestration
+- Confirmed monitoring setup
+- Validated content download process
+- Tested library XML generation
 
-### Current Development Focus
-- Performance optimization
-- Monitoring enhancements
-- Content validation
-- Documentation improvements
-- Example configurations
+### Current Focus
+- Comprehensive error handling for meta4 file parsing
+- Progress tracking for large downloads
+- Support for concurrent downloads
+- Enhanced monitoring metrics
+- Web UI improvements
 
 ## Quick Start
 
@@ -282,76 +263,30 @@ If you encounter any issues on first run, please ensure that the volume mappings
 
 ## Web Interface
 
-The library maintainer includes a web interface accessible at `http://localhost:3118` that provides:
+The library maintainer provides a web interface for managing content downloads:
 
-- Browsing the complete Kiwix library catalog
-- Filtering content by language and category
-- Searching for specific content
-- Selecting and queueing content for download
-- Monitoring download progress
-- Real-time status updates
+- **Content Browser**: Available at `http://localhost:3118`
+  - Browse available Kiwix content
+  - Filter by language and category
+  - Queue content for download
+  - Monitor download progress
+  - View download status
+
+- **Monitoring**: Available at `http://localhost:9090/metrics`
+  - Download statistics
+  - Content size metrics
+  - Update duration tracking
+  - Library size monitoring
+
+### Web Interface Features
+
+- **Content Selection**: Browse and select content from the Kiwix library
+- **Download Management**: Queue and monitor downloads
+- **Progress Tracking**: Real-time download progress updates
+- **Status Overview**: View active downloads and queue size
+- **Library Statistics**: Monitor total library size and content count
 
 ## Usage
 
 1. Start the service:
-   ```bash
-   python library-maintainer/src/main.py
    ```
-
-2. Access the web interface:
-   - Open `http://localhost:3118` in your browser
-   - Browse and select content for download
-   - Monitor download progress
-
-3. Monitor metrics:
-   - Prometheus metrics available at `http://localhost:9090/metrics`
-
-## Configuration
-
-The service can be configured through `config.yaml`:
-
-```yaml
-data_dir: /path/to/data/directory
-base_url: https://download.kiwix.org/zim/
-language_filter:
-  - eng
-  - spa
-content_pattern: ".*_all.*\\.zim$"
-scan_subdirs: true
-download_all: false
-
-options:
-  max_concurrent_downloads: 3
-  update_interval: 3600
-  retry_attempts: 3
-  cleanup_incomplete: true
-```
-
-## Development
-
-- Python 3.8+ required
-- Uses asyncio for concurrent operations
-- Structured logging with structlog
-- Prometheus metrics for monitoring
-- Web interface built with aiohttp and Bootstrap
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- [Kiwix](https://www.kiwix.org/) for providing ZIM files and infrastructure
-- [aiohttp](https://docs.aiohttp.org/) for the async web framework
-- [structlog](https://www.structlog.org/) for structured logging
-- [prometheus_client](https://github.com/prometheus/client_python) for metrics
-
---- 
