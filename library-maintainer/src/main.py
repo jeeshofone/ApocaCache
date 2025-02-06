@@ -55,6 +55,17 @@ class LibraryMaintainerService:
         log.info("shutdown.signal_received", signal=signum)
         self.running = False
     
+    async def _run_update_cycle(self):
+        """Run a complete content and library update cycle."""
+        try:
+            # Update content first
+            await self.content_manager.update_content()
+            # Then update the library catalog
+            await self.library_manager.update_library()
+            log.info("update_cycle.complete")
+        except Exception as e:
+            log.error("update_cycle.failed", error=str(e))
+    
     async def start(self):
         """Start the library maintainer service."""
         log.info("service.starting")
@@ -65,14 +76,14 @@ class LibraryMaintainerService:
         
         # Schedule content updates
         self.scheduler.add_job(
-            self.content_manager.update_content,
+            self._run_update_cycle,  # New method to handle complete update cycle
             'cron',
             **self.config.update_schedule
         )
         self.scheduler.start()
         
-        # Initial content update
-        await self.content_manager.update_content()
+        # Initial content update cycle
+        await self._run_update_cycle()
         
         # Main service loop
         while self.running:

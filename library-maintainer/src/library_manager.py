@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import aiofiles
 import structlog
+import traceback
 
 from config import Config, ContentItem
 import monitoring
@@ -51,6 +52,7 @@ class LibraryManager:
             
             # Track total library size
             total_size = 0
+            book_count = 0
             
             # Walk through all subdirectories
             for root_dir, dirs, files in os.walk(self.config.data_dir):
@@ -85,6 +87,12 @@ class LibraryManager:
                         else:
                             url = f"{self.config.base_url}{metadata['creator']}/{filename}"
                         ET.SubElement(book, 'url').text = url
+                        book_count += 1
+                        
+                        log.debug("library_update.added_book",
+                                title=metadata['name'],
+                                language=metadata['language'],
+                                size=size)
             
             # Format XML with proper indentation
             xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
@@ -103,12 +111,17 @@ class LibraryManager:
             duration = time.time() - start_time
             log.info("library_update.complete",
                      duration=duration,
-                     total_size=total_size)
+                     total_size=total_size,
+                     books=book_count,
+                     library_file=self.config.library_file)
             
         except Exception as e:
-            log.error("library_update.failed", error=str(e))
+            log.error("library_update.failed", 
+                     error=str(e),
+                     traceback=traceback.format_exc())
             if os.path.exists(temp_file):
                 os.remove(temp_file)
+            raise  # Re-raise to ensure the error is properly handled
     
     async def cleanup(self):
         """Clean up temporary library files."""
