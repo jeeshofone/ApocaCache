@@ -150,8 +150,6 @@ class ContentManager:
         log.info("content_manager.initialized",
                 base_url=self.base_url,
                 language_filter=self.config.language_filter,
-                content_pattern=self.config.content_pattern,
-                scan_subdirs=self.config.scan_subdirs,
                 download_all=self.config.download_all)
     
     def _parse_size(self, size_str: str) -> int:
@@ -199,25 +197,6 @@ class ContentManager:
             log.info("content_state.saved", items=len(self.content_state))
         except Exception as e:
             log.error("content_state.save_failed", error=str(e))
-    
-    def _matches_content_pattern(self, filename: str) -> bool:
-        """Check if filename matches content pattern."""
-        if not self.config.content_pattern:
-            return True
-            
-        patterns = self.config.content_pattern.split('|')
-        
-        for pattern in patterns:
-            try:
-                if re.search(pattern, filename):
-                    return True
-            except re.error as e:
-                log.error("content_pattern.invalid", 
-                         pattern=pattern,
-                         error=str(e))
-                continue
-                
-        return False
     
     def _matches_language_filter(self, filename: str) -> bool:
         """Check if filename matches language filter."""
