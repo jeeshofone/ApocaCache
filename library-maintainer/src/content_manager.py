@@ -369,6 +369,7 @@ class ContentManager:
         
         # Get MD5 from meta4 file if available
         expected_md5 = None
+        meta4_mirrors = []
         if url.endswith('.meta4'):
             meta4_mirrors, meta4_md5 = await self._fetch_meta4_file(url)
             if meta4_md5:
@@ -376,7 +377,7 @@ class ContentManager:
                       content=content.name,
                       md5=meta4_md5)
                 expected_md5 = meta4_md5
-                mirrors = meta4_mirrors
+                mirrors = meta4_mirrors if meta4_mirrors else mirrors
         
         # Check if we already have a version of this file
         dest_dir = os.path.dirname(dest_path)
@@ -391,7 +392,14 @@ class ContentManager:
             async with self.download_semaphore:
                 while retry_count <= max_retries:
                     # Try each mirror URL in sequence
-                    urls_to_try = [url] + (mirrors or [])
+                    urls_to_try = []
+                    if meta4_mirrors:
+                        urls_to_try.extend(meta4_mirrors)
+                    elif mirrors:
+                        urls_to_try.extend(mirrors)
+                    else:
+                        urls_to_try.append(url)
+                    
                     for current_url in urls_to_try:
                         try:
                             download_url = current_url if current_url.startswith('http') else urljoin(self.base_url, current_url)
@@ -400,7 +408,8 @@ class ContentManager:
                                     url=download_url,
                                     dest=dest_path,
                                     attempt=retry_count + 1,
-                                    max_attempts=max_retries + 1)
+                                    max_attempts=max_retries + 1,
+                                    expected_md5=expected_md5)  # Add MD5 to log
                             
                             timeout = aiohttp.ClientTimeout(
                                 total=None,
@@ -447,29 +456,34 @@ class ContentManager:
                                                         downloaded=downloaded,
                                                         total=total_size)
                                     
-                                    # Only verify MD5 if we have an expected hash from meta4
+                                    # Verify MD5 if we have an expected hash
                                     if expected_md5:
                                         actual_md5 = self._calculate_file_md5(temp_path)
                                         if not actual_md5:
-                                            log.error("md5_calculate.failed", file=temp_path)
+                                            log.error("md5_calculate.failed", 
+                                                    file=temp_path,
+                                                    content=content.name)
                                             continue
                                         
                                         if actual_md5.lower() != expected_md5.lower():
                                             log.error("md5_verify.mismatch",
                                                     file=temp_path,
                                                     expected=expected_md5,
-                                                    actual=actual_md5)
+                                                    actual=actual_md5,
+                                                    content=content.name)
                                             if os.path.exists(temp_path):
                                                 os.remove(temp_path)
                                             continue
                                         
                                         log.info("md5_verify.success",
                                                 content=content.name,
-                                                md5=actual_md5)
+                                                md5=actual_md5,
+                                                file=temp_path)
                                     else:
                                         log.warning("md5_verify.skipped",
                                                   content=content.name,
-                                                  reason="No meta4 hash available")
+                                                  reason="No meta4 hash available",
+                                                  url=download_url)
                                     
                                     # Move file to final location
                                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
