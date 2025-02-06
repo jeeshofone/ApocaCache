@@ -385,9 +385,6 @@ class ContentManager:
         max_retries = self.config.options.retry_attempts
         retry_count = 0
         
-        # Get MD5 URL
-        md5_url = f"{url}.md5"
-        
         # Check if we already have a version of this file
         dest_dir = os.path.dirname(dest_path)
         base_pattern = re.sub(r'_\d{4}-\d{2}\.zim$', '', os.path.basename(dest_path))
@@ -411,6 +408,19 @@ class ContentManager:
                                     dest=dest_path,
                                     attempt=retry_count + 1,
                                     max_attempts=max_retries + 1)
+                            
+                            # Get MD5 from meta4 file if available
+                            if url.endswith('.meta4'):
+                                expected_md5 = await self._get_remote_md5(url)
+                                if not expected_md5:
+                                    log.error("md5_fetch.failed_from_meta4", url=url)
+                                    continue
+                            else:
+                                # Use traditional .md5 file
+                                expected_md5 = await self._get_remote_md5(download_url)
+                                if not expected_md5:
+                                    log.error("md5_fetch.failed_from_md5", url=download_url)
+                                    continue
                             
                             timeout = aiohttp.ClientTimeout(
                                 total=None,
@@ -457,8 +467,14 @@ class ContentManager:
                                                         downloaded=downloaded,
                                                         total=total_size)
                                     
-                                    # Verify the download using MD5
-                                    if await self._verify_download(temp_path, md5_url):
+                                    # Calculate MD5 of downloaded file
+                                    actual_md5 = self._calculate_file_md5(temp_path)
+                                    if not actual_md5:
+                                        log.error("md5_calculate.failed", file=temp_path)
+                                        continue
+                                    
+                                    # Verify MD5
+                                    if actual_md5.lower() == expected_md5.lower():
                                         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                                         os.rename(temp_path, dest_path)
                                         
@@ -480,6 +496,10 @@ class ContentManager:
                                         monitoring.record_download("success", content.language)
                                         return True
                                     else:
+                                        log.error("md5_verify.mismatch",
+                                                file=temp_path,
+                                                expected=expected_md5,
+                                                actual=actual_md5)
                                         if os.path.exists(temp_path):
                                             os.remove(temp_path)
                                         continue  # Try next mirror
