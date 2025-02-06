@@ -871,56 +871,6 @@ class ContentManager:
             for name in self.active_downloads
         ] 
 
-    async def _process_meta4_batch(self, books: List[ET.Element]) -> List[ContentFile]:
-        """Process a batch of books to fetch their meta4 files in parallel."""
-        content_files = []
-        tasks = []
-        
-        for book in books:
-            url = book.get("url", "")
-            if not url or not url.endswith(".meta4"):
-                continue
-                
-            size = int(book.get("size", 0))
-            name = book.get("name", "")
-            date = book.get("date", "")
-            
-            # Create task for fetching meta4
-            task = asyncio.create_task(self._fetch_meta4_file(url))
-            tasks.append((book, task))
-        
-        # Wait for all meta4 fetches to complete
-        for book, task in tasks:
-            try:
-                mirrors, md5_hash = await task
-                if not mirrors:
-                    log.warning("content.no_mirrors", name=book.get("name", ""))
-                    continue
-
-                log.info("content.meta4_parsed",
-                        name=book.get("name", ""),
-                        mirrors=len(mirrors),
-                        md5=md5_hash)
-
-                content_file = ContentFile(
-                    name=book.get("name", ""),
-                    path=book.get("name", ""),
-                    url=book.get("url", ""),
-                    size=int(book.get("size", 0)),
-                    date=book.get("date", ""),
-                    mirrors=mirrors,
-                    md5_url=book.get("url", "")
-                )
-                content_files.append(content_file)
-                
-            except Exception as e:
-                log.error("content.parse_failed", 
-                         error=str(e),
-                         name=book.get("name", ""))
-                continue
-                
-        return content_files
-
     async def _get_available_content(self) -> List[ContentFile]:
         """Get list of available content from central library XML."""
         try:
@@ -941,8 +891,39 @@ class ContentManager:
                         size=len(batch),
                         total=len(books))
                 
-                batch_results = await self._process_meta4_batch(batch)
-                content_files.extend(batch_results)
+                # Process meta4 files in parallel
+                tasks = []
+                for book in batch:
+                    url = book.get("url", "")
+                    if url and url.endswith(".meta4"):
+                        task = asyncio.create_task(self._fetch_meta4_file(url))
+                        tasks.append((book, task))
+                
+                # Wait for all meta4 fetches to complete
+                if tasks:
+                    log.info("content.fetching_meta4", count=len(tasks))
+                    for book, task in tasks:
+                        try:
+                            mirrors, md5_hash = await task
+                            if mirrors:
+                                content_file = ContentFile(
+                                    name=book.get("name", ""),
+                                    path=book.get("name", ""),
+                                    url=book.get("url", ""),
+                                    size=int(book.get("size", 0)),
+                                    date=book.get("date", ""),
+                                    mirrors=mirrors,
+                                    md5_url=book.get("url", "")
+                                )
+                                content_files.append(content_file)
+                                log.info("content.meta4_parsed",
+                                        name=book.get("name", ""),
+                                        mirrors=len(mirrors),
+                                        md5=md5_hash)
+                        except Exception as e:
+                            log.error("content.meta4_failed",
+                                    name=book.get("name", ""),
+                                    error=str(e))
 
             log.info("content_list.complete", count=len(content_files))
             return content_files
