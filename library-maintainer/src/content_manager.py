@@ -296,7 +296,7 @@ class ContentManager:
             return [], None
 
     async def _get_remote_md5(self, url: str) -> Optional[str]:
-        """Get MD5 hash from remote .md5 file or meta4 file."""
+        """Get MD5 hash from meta4 file."""
         try:
             if url.endswith('.meta4'):
                 # Extract MD5 from meta4 file
@@ -304,29 +304,6 @@ class ContentManager:
                 if md5_hash:
                     log.info("md5_fetch.from_meta4", url=url, md5=md5_hash)
                     return md5_hash
-                return None
-            else:
-                # Try traditional .md5 file as fallback
-                md5_url = f"{url}.md5" if not url.endswith('.md5') else url
-                log.info("md5_fetch.starting", url=md5_url)
-                
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(md5_url) as response:
-                            if response.status != 200:
-                                log.warning("md5_fetch.failed", url=md5_url, status=response.status)
-                                return None
-                            
-                            content = await response.text()
-                            md5_match = re.match(r'^([a-f0-9]{32})\s+', content.strip())
-                            if md5_match:
-                                md5_hash = md5_match.group(1)
-                                log.info("md5_fetch.from_md5", url=md5_url, md5=md5_hash)
-                                return md5_hash
-                except Exception as e:
-                    log.warning("md5_fetch.failed", url=md5_url, error=str(e))
-                    return None
-            
             return None
         except Exception as e:
             log.error("md5_fetch.error", url=url, error=str(e))
@@ -418,16 +395,10 @@ class ContentManager:
                             expected_md5 = None
                             if url.endswith('.meta4'):
                                 expected_md5 = await self._get_remote_md5(url)
-                            
-                            # If no MD5 from meta4, try .md5 file
-                            if not expected_md5:
-                                expected_md5 = await self._get_remote_md5(download_url)
-                            
-                            # If still no MD5, log warning but continue with download
-                            if not expected_md5:
-                                log.warning("md5_verify.no_hash_available", 
-                                          content=content.name,
-                                          url=download_url)
+                                if not expected_md5:
+                                    log.warning("md5_verify.no_hash_available", 
+                                              content=content.name,
+                                              url=download_url)
                             
                             timeout = aiohttp.ClientTimeout(
                                 total=None,
@@ -474,7 +445,7 @@ class ContentManager:
                                                         downloaded=downloaded,
                                                         total=total_size)
                                     
-                                    # Only verify MD5 if we have an expected hash
+                                    # Only verify MD5 if we have an expected hash from meta4
                                     if expected_md5:
                                         actual_md5 = self._calculate_file_md5(temp_path)
                                         if not actual_md5:
@@ -492,7 +463,7 @@ class ContentManager:
                                     else:
                                         log.warning("md5_verify.skipped",
                                                   content=content.name,
-                                                  reason="No hash available")
+                                                  reason="No meta4 hash available")
                                     
                                     # Move file to final location
                                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)

@@ -155,3 +155,6 @@ User attempted to start the English-All configuration with docker compose but en
 Fri Feb  7 00:37:58 AEDT 2025
 ## Docker Compose English All Success
 User successfully tested the improved MD5 verification handling. The system now properly handles missing MD5 files and continues downloads while maintaining security when verification is available.
+Fri Feb  7 00:39:26 AEDT 2025
+## MD5 Verification Update
+User requested removal of .md5 file fallback verification. System now exclusively uses meta4 file MD5 hashes for verification.
