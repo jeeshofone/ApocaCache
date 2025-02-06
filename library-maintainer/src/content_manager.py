@@ -370,11 +370,13 @@ class ContentManager:
         # Get MD5 from meta4 file if available
         expected_md5 = None
         if url.endswith('.meta4'):
-            mirrors, expected_md5 = await self._fetch_meta4_file(url)
-            if expected_md5:
+            meta4_mirrors, meta4_md5 = await self._fetch_meta4_file(url)
+            if meta4_md5:
                 log.info("md5_verify.meta4_hash_found", 
                       content=content.name,
-                      md5=expected_md5)
+                      md5=meta4_md5)
+                expected_md5 = meta4_md5
+                mirrors = meta4_mirrors
         
         # Check if we already have a version of this file
         dest_dir = os.path.dirname(dest_path)
