@@ -18,7 +18,7 @@ from config import Config
 from content_manager import ContentManager
 from library_manager import LibraryManager
 from web_server import WebServer
-from monitoring import setup_monitoring, start_server
+from monitoring import setup_monitoring
 
 # Configure structured logging
 structlog.configure(
@@ -121,7 +121,7 @@ async def main():
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
         
         # Start monitoring server
-        start_server()
+        setup_monitoring()
         
         while True:
             try:
