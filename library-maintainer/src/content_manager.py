@@ -157,7 +157,7 @@ class ContentManager:
         if not size_str or size_str == '-':
             return 0
             
-        # Remove any whitespace
+        # Remove any whitespace and handle 'M' suffix
         size_str = size_str.strip()
         
         # Parse size with units
@@ -169,9 +169,16 @@ class ContentManager:
         }
         
         try:
-            if size_str[-1] in units:
-                number = float(size_str[:-1])
-                return int(number * units[size_str[-1]])
+            # Handle decimal numbers with units (e.g., "5.2M")
+            match = re.match(r'^(\d+\.?\d*)([KMGT])?$', size_str)
+            if match:
+                number = float(match.group(1))
+                unit = match.group(2)
+                if unit and unit in units:
+                    return int(number * units[unit])
+                return int(number)
+            
+            # Try parsing as plain integer
             return int(size_str)
         except (ValueError, IndexError):
             log.warning("size_parse.failed", size_str=size_str)
