@@ -556,10 +556,14 @@ class ContentManager:
             monitoring.record_download("failed", content.language)
             return False
     
-    async def update_content(self):
-        """Update content based on configuration."""
+    async def update_content(self, force_update: bool = False):
+        """Update content based on configuration.
+        
+        Args:
+            force_update: If True, force update of meta4 files even if content exists
+        """
         start_time = time.time()
-        log.info("content_update.starting")
+        log.info("content_update.starting", force_update=force_update)
         
         try:
             available_content = await self._get_available_content()
@@ -644,7 +648,7 @@ class ContentManager:
                                 existing_files.append(os.path.join(dest_dir, f))
                     
                     # Check if download/update needed
-                    needs_download = not os.path.exists(dest_path)
+                    needs_download = not os.path.exists(dest_path) or force_update
                     
                     # Check both file size and date for updates
                     current_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0

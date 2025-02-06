@@ -111,9 +111,13 @@ async def main():
         library_manager = LibraryManager(config)
         web_server = WebServer(content_manager, config)
         
-        # Pre-fetch library XML
+        # Pre-fetch library XML and content
         log.info("startup.prefetching_library_xml")
         await content_manager._fetch_library_xml()
+        
+        # Initial content update
+        log.info("startup.initial_content_update")
+        await content_manager.update_content(force_update=True)
         
         # Start web server
         await web_server.start()
