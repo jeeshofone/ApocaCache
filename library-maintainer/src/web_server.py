@@ -146,9 +146,11 @@ class WebServer:
     async def handle_status(self, request):
         """Handle status request."""
         try:
+            # Get queue size safely
+            queue_size = self.content_manager.download_queue.qsize()
             status = {
                 'downloads': self.content_manager.get_download_status(),
-                'queue_size': len(self.content_manager.download_queue),
+                'queue_size': queue_size,
                 'active_downloads': len(self.content_manager.active_downloads)
             }
             return web.json_response(status)

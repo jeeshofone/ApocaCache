@@ -312,29 +312,28 @@ class ContentManager:
     async def _get_remote_md5(self, url: str) -> Optional[str]:
         """Get MD5 hash from remote .md5 file."""
         try:
-            log.info("md5_fetch.starting", url=url)
+            # Ensure we're using the correct MD5 URL format
+            md5_url = f"{url}.md5" if not url.endswith('.md5') else url
+            log.info("md5_fetch.starting", url=md5_url)
+            
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+                async with session.get(md5_url) as response:
                     if response.status != 200:
-                        log.error("md5_fetch.failed", url=url, status=response.status)
+                        log.error("md5_fetch.failed", url=md5_url, status=response.status)
                         return None
                     
                     content = await response.text()
-                    # Parse the MD5 from the HTML response
-                    soup = BeautifulSoup(content, 'html.parser')
-                    md5_text = soup.get_text().strip()
-                    if md5_text:
-                        # Extract just the MD5 hash from the text
-                        md5_match = re.match(r'^([a-f0-9]{32})\s+', md5_text)
-                        if md5_match:
-                            md5_hash = md5_match.group(1)
-                            log.info("md5_fetch.success", url=url, md5=md5_hash)
-                            return md5_hash
+                    # Parse the MD5 from the response
+                    md5_match = re.match(r'^([a-f0-9]{32})\s+', content.strip())
+                    if md5_match:
+                        md5_hash = md5_match.group(1)
+                        log.info("md5_fetch.success", url=md5_url, md5=md5_hash)
+                        return md5_hash
             
-            log.error("md5_parse.failed", url=url, content=content)
+            log.error("md5_parse.failed", url=md5_url, content=content)
             return None
         except Exception as e:
-            log.error("md5_fetch.error", url=url, error=str(e))
+            log.error("md5_fetch.error", url=md5_url, error=str(e))
             return None
 
     def _calculate_file_md5(self, filepath: str) -> Optional[str]:
