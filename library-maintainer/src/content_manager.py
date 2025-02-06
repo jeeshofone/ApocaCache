@@ -139,7 +139,12 @@ class ContentManager:
         self.content_state: Dict[str, Dict] = {}
         self.directory_parser = ApacheDirectoryParser()
         self.library_xml_url = "https://download.kiwix.org/library/library_zim.xml"
+        self.download_queue = asyncio.Queue()
+        self.active_downloads = set()
         self._load_state()
+        
+        # Start download worker
+        asyncio.create_task(self._download_worker())
         
         # Log initial configuration
         log.info("content_manager.initialized",
@@ -727,4 +732,87 @@ class ContentManager:
                 if filename.endswith('.tmp'):
                     os.remove(os.path.join(self.config.data_dir, filename))
         except Exception as e:
-            log.error("cleanup.failed", error=str(e)) 
+            log.error("cleanup.failed", error=str(e))
+
+    async def queue_download(self, book: Dict):
+        """Queue a book for download."""
+        try:
+            # Create a content item from the book data
+            content_item = ContentItem(
+                name=book['name'],
+                language=book['language'],
+                category=book.get('creator', 'unknown')
+            )
+            
+            # Add to queue
+            await self.download_queue.put((book, content_item))
+            log.info("download.queued", book=book['name'])
+            
+        except Exception as e:
+            log.error("queue_download.failed", error=str(e))
+            raise
+
+    async def _download_worker(self):
+        """Background worker to process download queue."""
+        while True:
+            try:
+                book, content_item = await self.download_queue.get()
+                
+                # Get mirror URLs from meta4 file
+                mirrors = []
+                if book['url'].endswith('.meta4'):
+                    mirrors = await self._fetch_meta4_file(book['url'])
+                
+                if not mirrors:
+                    log.error("download_worker.no_mirrors", book=book['name'])
+                    continue
+                
+                # Use first mirror as primary URL
+                url = mirrors[0]
+                
+                # Create category subdirectory
+                category_dir = os.path.join(self.config.data_dir, content_item.category)
+                os.makedirs(category_dir, exist_ok=True)
+                
+                # Determine destination path
+                filename = os.path.basename(url)
+                if not filename.endswith('.zim'):
+                    filename = f"{book['name']}.zim"
+                
+                dest_path = os.path.join(category_dir, filename)
+                
+                # Add to active downloads
+                self.active_downloads.add(book['name'])
+                
+                try:
+                    # Download the file
+                    success = await self._download_file(
+                        url,
+                        dest_path,
+                        content_item,
+                        mirrors[1:]  # Rest of mirrors as fallbacks
+                    )
+                    
+                    if success:
+                        log.info("download_worker.success", book=book['name'])
+                    else:
+                        log.error("download_worker.failed", book=book['name'])
+                        
+                finally:
+                    # Remove from active downloads
+                    self.active_downloads.discard(book['name'])
+                    
+            except Exception as e:
+                log.error("download_worker.error", error=str(e))
+            finally:
+                self.download_queue.task_done()
+
+    def get_download_status(self) -> List[Dict]:
+        """Get status of current downloads."""
+        return [
+            {
+                'name': name,
+                'status': 'downloading'
+            }
+            for name in self.active_downloads
+        ] 

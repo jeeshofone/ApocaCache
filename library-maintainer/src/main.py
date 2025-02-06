@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 from typing import Set
 
 import structlog
@@ -16,7 +17,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import Config
 from content_manager import ContentManager
 from library_manager import LibraryManager
-from monitoring import setup_monitoring
+from web_server import WebServer
+from monitoring import setup_monitoring, start_server
 
 # Configure structured logging
 structlog.configure(
@@ -98,17 +100,62 @@ class LibraryMaintainerService:
         await self.content_manager.cleanup()
         log.info("service.shutdown_complete")
 
-def main():
+async def main():
     """Main entry point."""
-    service = LibraryMaintainerService()
-    
     try:
-        asyncio.run(service.start())
+        # Load configuration
+        config = Config()
+        
+        # Initialize managers
+        content_manager = ContentManager(config)
+        library_manager = LibraryManager(config)
+        web_server = WebServer(content_manager, config)
+        
+        # Start web server
+        await web_server.start()
+        log.info("web_server.started")
+        
+        # Setup signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s)))
+        
+        # Start monitoring server
+        start_server()
+        
+        while True:
+            try:
+                # Update content
+                await content_manager.update_content()
+                
+                # Update library
+                await library_manager.update_library()
+                
+                # Wait for next update
+                await asyncio.sleep(config.options.update_interval)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.error("update.failed", error=str(e))
+                await asyncio.sleep(60)  # Wait before retry
+        
     except Exception as e:
-        log.error("service.fatal_error", error=str(e), exc_info=True)
-        return 1
-    
-    return 0
+        log.error("startup.failed", error=str(e))
+        sys.exit(1)
+
+async def shutdown(sig):
+    """Cleanup and shutdown."""
+    log.info("shutdown.starting", signal=sig)
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    [task.cancel() for task in tasks]
+    log.info("shutdown.cancel_tasks", count=len(tasks))
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop = asyncio.get_running_loop()
+    loop.stop()
 
 if __name__ == "__main__":
-    exit(main()) 
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass 

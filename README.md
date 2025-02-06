@@ -15,6 +15,8 @@ A robust library maintainer for offline content caching, specifically designed t
 - **Progress Monitoring**: Detailed logging and progress tracking for downloads
 - **Apache Directory Parsing**: Efficient parsing of Apache directory listings with caching
 - **State Management**: Maintains download state and content metadata
+- **Web Interface**: Accessible at `http://localhost:3118` for browsing and selecting content
+- **Prometheus Metrics**: Available at `http://localhost:9090/metrics` for monitoring
 
 ## Project Structure
 
@@ -277,5 +279,79 @@ This project is designed to work immediately after cloning. The repository has b
 - The library maintainer service will parse the default library file and trigger a download of the content (if not already present) from the official Kiwix server.
 
 If you encounter any issues on first run, please ensure that the volume mappings and file permissions are correctly configured, and verify that the default entries in `examples/kiwix/library.xml` suit your needs.
+
+## Web Interface
+
+The library maintainer includes a web interface accessible at `http://localhost:3118` that provides:
+
+- Browsing the complete Kiwix library catalog
+- Filtering content by language and category
+- Searching for specific content
+- Selecting and queueing content for download
+- Monitoring download progress
+- Real-time status updates
+
+## Usage
+
+1. Start the service:
+   ```bash
+   python library-maintainer/src/main.py
+   ```
+
+2. Access the web interface:
+   - Open `http://localhost:3118` in your browser
+   - Browse and select content for download
+   - Monitor download progress
+
+3. Monitor metrics:
+   - Prometheus metrics available at `http://localhost:9090/metrics`
+
+## Configuration
+
+The service can be configured through `config.yaml`:
+
+```yaml
+data_dir: /path/to/data/directory
+base_url: https://download.kiwix.org/zim/
+language_filter:
+  - eng
+  - spa
+content_pattern: ".*_all.*\\.zim$"
+scan_subdirs: true
+download_all: false
+
+options:
+  max_concurrent_downloads: 3
+  update_interval: 3600
+  retry_attempts: 3
+  cleanup_incomplete: true
+```
+
+## Development
+
+- Python 3.8+ required
+- Uses asyncio for concurrent operations
+- Structured logging with structlog
+- Prometheus metrics for monitoring
+- Web interface built with aiohttp and Bootstrap
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- [Kiwix](https://www.kiwix.org/) for providing ZIM files and infrastructure
+- [aiohttp](https://docs.aiohttp.org/) for the async web framework
+- [structlog](https://www.structlog.org/) for structured logging
+- [prometheus_client](https://github.com/prometheus/client_python) for metrics
 
 --- 
