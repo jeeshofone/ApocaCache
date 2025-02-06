@@ -415,7 +415,7 @@ class ContentManager:
                                     dest=dest_path,
                                     attempt=retry_count + 1,
                                     max_attempts=max_retries + 1,
-                                    expected_md5=expected_md5)  # Add MD5 to log
+                                    expected_md5=expected_md5)  # Log the expected MD5
                             
                             timeout = aiohttp.ClientTimeout(
                                 total=None,
