@@ -125,10 +125,7 @@ async def main():
         
         while True:
             try:
-                # Update content
-                await content_manager.update_content()
-                
-                # Update library
+                # Only update library catalog
                 await library_manager.update_library()
                 
                 # Wait for next update
