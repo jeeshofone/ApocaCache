@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import sys
+import shutil
 from typing import Set
 
 import structlog
@@ -114,11 +115,45 @@ class LibraryMaintainerService:
         await self.content_manager.cleanup()
         log.info("service.shutdown_complete")
 
+async def initialize_library_xml(config: Config) -> bool:
+    """Initialize library.xml file if it doesn't exist."""
+    library_path = os.path.join(config.data_dir, "library.xml")
+    old_library_path = os.path.join(config.data_dir, "old", "library.xml")
+    
+    try:
+        # If library.xml doesn't exist but we have an old one, copy it
+        if not os.path.exists(library_path) and os.path.exists(old_library_path):
+            log.info("library.copying_from_old", 
+                    old_path=old_library_path, 
+                    new_path=library_path)
+            os.makedirs(os.path.dirname(library_path), exist_ok=True)
+            shutil.copy2(old_library_path, library_path)
+            return True
+            
+        # If no library file exists, create an empty one
+        if not os.path.exists(library_path):
+            log.info("library.creating_empty", path=library_path)
+            os.makedirs(os.path.dirname(library_path), exist_ok=True)
+            with open(library_path, 'w') as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n<library version="20110515">\n</library>')
+            return True
+            
+        return True
+        
+    except Exception as e:
+        log.error("library.init_failed", error=str(e))
+        return False
+
 async def main():
     """Main entry point."""
     try:
         # Load configuration
         config = Config()
+        
+        # Initialize library.xml
+        if not await initialize_library_xml(config):
+            log.error("startup.library_init_failed")
+            sys.exit(1)
         
         # Initialize managers
         content_manager = ContentManager(config)
