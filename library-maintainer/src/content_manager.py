@@ -307,7 +307,6 @@ class ContentManager:
                 # Extract MD5 from meta4 file
                 mirrors, md5_hash = await self._fetch_meta4_file(url)
                 if md5_hash:
-                    log.info("md5_fetch.from_meta4", url=url, md5=md5_hash)
                     return md5_hash
             return None
         except Exception as e:
@@ -880,14 +879,11 @@ class ContentManager:
             books = library_root.findall(".//book")
             content_files = []
             batch_size = 100
+            successful_parses = 0
 
             # Process books in batches
             for i in range(0, len(books), batch_size):
                 batch = books[i:i + batch_size]
-                log.info("content.processing_batch", 
-                        start=i, 
-                        size=len(batch),
-                        total=len(books))
                 
                 # Process meta4 files in parallel
                 tasks = []
@@ -899,7 +895,6 @@ class ContentManager:
                 
                 # Wait for all meta4 fetches to complete
                 if tasks:
-                    log.info("content.fetching_meta4", count=len(tasks))
                     for book, task in tasks:
                         try:
                             mirrors, md5_hash = await task
@@ -914,16 +909,18 @@ class ContentManager:
                                     md5_url=book.get("url", "")
                                 )
                                 content_files.append(content_file)
-                                log.info("content.meta4_parsed",
-                                        name=book.get("name", ""),
-                                        mirrors=len(mirrors),
-                                        md5=md5_hash)
+                                successful_parses += 1
+                                if successful_parses % 25 == 0:
+                                    log.info("meta4_parse.status", successful_parses=successful_parses)
                         except Exception as e:
-                            log.error("content.meta4_failed",
+                            log.error("meta4_parse.failed",
                                     name=book.get("name", ""),
                                     error=str(e))
 
-            log.info("content_list.complete", count=len(content_files))
+            log.info("meta4_parse.complete", 
+                    total_processed=len(books), 
+                    successful=successful_parses,
+                    failed=len(books) - successful_parses)
             return content_files
 
         except Exception as e:
