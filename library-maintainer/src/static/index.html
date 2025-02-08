@@ -51,6 +51,25 @@
             align-items: center;
             z-index: 2000;
         }
+        .meta4-status {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255,255,255,0.95);
+            padding: 0.5rem;
+            text-align: center;
+            z-index: 2000;
+            border-bottom: 1px solid #dee2e6;
+            display: none;
+        }
+        .meta4-status.active {
+            display: block;
+        }
+        .progress {
+            height: 0.5rem;
+            margin-top: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -90,6 +109,13 @@
                 <div class="col text-end">
                     <span id="queueStatus"></span>
                 </div>
+            </div>
+        </div>
+
+        <div class="meta4-status">
+            <div>Updating file information... <span id="meta4Progress">0/0</span> files</div>
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
             </div>
         </div>
     </div>
@@ -254,6 +280,37 @@
             }
         }
 
+        async function updateMeta4Status() {
+            try {
+                const response = await fetch('/meta4-status');
+                const status = await response.json();
+                
+                const statusDiv = document.querySelector('.meta4-status');
+                const progressSpan = document.getElementById('meta4Progress');
+                const progressBar = document.querySelector('.progress-bar');
+                
+                if (status.total_files > 0) {
+                    statusDiv.classList.add('active');
+                    progressSpan.textContent = `${status.processed_files}/${status.total_files}`;
+                    const percent = (status.processed_files / status.total_files) * 100;
+                    progressBar.style.width = `${percent}%`;
+                    
+                    if (!status.is_complete) {
+                        setTimeout(updateMeta4Status, 1000);
+                    } else {
+                        setTimeout(() => {
+                            statusDiv.classList.remove('active');
+                        }, 3000);
+                    }
+                } else {
+                    statusDiv.classList.remove('active');
+                }
+                
+            } catch (error) {
+                console.error('Error updating meta4 status:', error);
+            }
+        }
+
         // Event Listeners
         document.getElementById('searchInput').addEventListener('input', renderBooks);
         document.getElementById('languageFilter').addEventListener('change', renderBooks);
@@ -262,6 +319,7 @@
 
         // Initial load
         fetchLibraries();
+        updateMeta4Status();
         
         // Update status every 5 seconds
         setInterval(updateStatus, 5000);

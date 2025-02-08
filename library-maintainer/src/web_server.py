@@ -10,8 +10,9 @@ import aiofiles
 from aiohttp import web
 import structlog
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from datetime import datetime
+import asyncio
 
 from database import DatabaseManager
 
@@ -30,6 +31,8 @@ class WebServer:
         self.library_cache_time = None
         self.cache_ttl = 3600  # 1 hour cache TTL
         self.db = DatabaseManager(config.data_dir)
+        self.meta4_semaphore = asyncio.Semaphore(10)  # Limit concurrent meta4 downloads
+        self.is_updating_meta4 = False
         
     def setup_routes(self):
         """Setup web server routes."""
@@ -37,6 +40,7 @@ class WebServer:
         self.app.router.add_get('/library', self.handle_library)
         self.app.router.add_post('/queue', self.handle_queue)
         self.app.router.add_get('/status', self.handle_status)
+        self.app.router.add_get('/meta4-status', self.handle_meta4_status)
         self.app.router.add_static('/static', os.path.join(os.path.dirname(__file__), 'static'))
     
     async def start(self):
@@ -46,56 +50,124 @@ class WebServer:
         site = web.TCPSite(runner, '0.0.0.0', 3118)
         await site.start()
         log.info("web_server.started", port=3118)
+        
+        # Start meta4 update process in background
+        asyncio.create_task(self._update_meta4_files())
     
     async def _parse_meta4_file(self, url: str) -> Dict:
         """Parse meta4 file to extract size and hash information."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        return {}
-                    
-                    content = await response.text()
-                    root = ET.fromstring(content)
-                    
-                    # Extract file information
-                    file_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}file")
-                    if file_elem is None:
-                        return {}
-                    
-                    # Get file name
-                    file_name = file_elem.get("name", "")
-                    
-                    # Get file size
-                    size_elem = file_elem.find(".//{urn:ietf:params:xml:ns:metalink}size")
-                    file_size = int(size_elem.text) if size_elem is not None else 0
-                    
-                    # Get hashes
-                    hashes = {}
-                    for hash_elem in file_elem.findall(".//{urn:ietf:params:xml:ns:metalink}hash"):
-                        hash_type = hash_elem.get("type", "")
-                        if hash_type and hash_elem.text:
-                            hashes[hash_type] = hash_elem.text
-                    
-                    # Get mirrors
-                    mirrors = []
-                    for url_elem in root.findall(".//{urn:ietf:params:xml:ns:metalink}url"):
-                        if url_elem.text:
-                            mirrors.append(url_elem.text)
-                    
-                    return {
-                        "file_name": file_name,
-                        "file_size": file_size,
-                        "md5_hash": hashes.get("md5", ""),
-                        "sha1_hash": hashes.get("sha-1", ""),
-                        "sha256_hash": hashes.get("sha-256", ""),
-                        "mirrors": mirrors,
-                        "meta4_url": url
-                    }
-                    
+            async with self.meta4_semaphore:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status != 200:
+                            return {}
+                        
+                        content = await response.text()
+                        root = ET.fromstring(content)
+                        
+                        # Extract file information
+                        file_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}file")
+                        if file_elem is None:
+                            return {}
+                        
+                        # Get file name
+                        file_name = file_elem.get("name", "")
+                        
+                        # Get file size
+                        size_elem = file_elem.find(".//{urn:ietf:params:xml:ns:metalink}size")
+                        file_size = int(size_elem.text) if size_elem is not None else 0
+                        
+                        # Get hashes
+                        hashes = {}
+                        for hash_elem in file_elem.findall(".//{urn:ietf:params:xml:ns:metalink}hash"):
+                            hash_type = hash_elem.get("type", "")
+                            if hash_type and hash_elem.text:
+                                hashes[hash_type] = hash_elem.text
+                        
+                        # Get mirrors
+                        mirrors = []
+                        for url_elem in root.findall(".//{urn:ietf:params:xml:ns:metalink}url"):
+                            if url_elem.text:
+                                mirrors.append(url_elem.text)
+                        
+                        return {
+                            "file_name": file_name,
+                            "file_size": file_size,
+                            "md5_hash": hashes.get("md5", ""),
+                            "sha1_hash": hashes.get("sha-1", ""),
+                            "sha256_hash": hashes.get("sha-256", ""),
+                            "mirrors": mirrors,
+                            "meta4_url": url
+                        }
+                        
         except Exception as e:
             log.error("meta4_parse.failed", url=url, error=str(e))
             return {}
+    
+    async def _update_meta4_files(self):
+        """Update all meta4 files in parallel."""
+        if self.is_updating_meta4:
+            return
+            
+        self.is_updating_meta4 = True
+        try:
+            # Get library data
+            library_root = await self.content_manager._fetch_library_xml()
+            if not library_root:
+                return
+            
+            # Get all meta4 URLs
+            books = []
+            for book in library_root.findall(".//book"):
+                url = book.get('url', '')
+                if url.endswith('.meta4'):
+                    books.append({
+                        'id': book.get('id', ''),
+                        'url': url
+                    })
+            
+            total_files = len(books)
+            processed_files = 0
+            self.db.update_meta4_download_status(total_files, processed_files)
+            
+            # Process meta4 files in batches
+            batch_size = 10
+            for i in range(0, len(books), batch_size):
+                batch = books[i:i+batch_size]
+                tasks = []
+                
+                for book in batch:
+                    task = asyncio.create_task(self._parse_meta4_file(book['url']))
+                    tasks.append((book['id'], task))
+                
+                # Wait for batch to complete
+                updates = []
+                for book_id, task in tasks:
+                    try:
+                        meta4_data = await task
+                        if meta4_data:
+                            meta4_data['book_id'] = book_id
+                            updates.append(meta4_data)
+                    except Exception as e:
+                        log.error("meta4_batch.failed", book_id=book_id, error=str(e))
+                
+                # Batch update database
+                if updates:
+                    await self.db.batch_update_meta4_info(updates)
+                
+                processed_files += len(batch)
+                self.db.update_meta4_download_status(total_files, processed_files)
+            
+            self.db.update_meta4_download_status(total_files, processed_files, True)
+            log.info("meta4_update.complete", 
+                    total=total_files, 
+                    processed=processed_files)
+            
+        except Exception as e:
+            log.error("meta4_update.failed", error=str(e))
+        finally:
+            self.is_updating_meta4 = False
     
     async def get_library_xml(self) -> Optional[List[Dict]]:
         """Get the library XML content, using cache if available."""
@@ -134,16 +206,8 @@ class WebServer:
                     
                     # Check if we have cached meta4 info
                     meta4_info = self.db.get_meta4_info(book_data['id'])
-                    
                     if meta4_info:
                         book_data['size'] = meta4_info['file_size']
-                    else:
-                        # If URL ends with .meta4, fetch and cache the information
-                        if book_data['url'].endswith('.meta4'):
-                            meta4_info = await self._parse_meta4_file(book_data['url'])
-                            if meta4_info:
-                                await self.db.update_meta4_info(book_data['id'], meta4_info)
-                                book_data['size'] = meta4_info['file_size']
                     
                     books.append(book_data)
                     
@@ -182,6 +246,15 @@ class WebServer:
         except Exception as e:
             log.error("library.failed", error=str(e))
             return web.Response(text="Error fetching library data", status=500)
+    
+    async def handle_meta4_status(self, request):
+        """Handle meta4 download status request."""
+        try:
+            status = self.db.get_meta4_download_status()
+            return web.json_response(status)
+        except Exception as e:
+            log.error("meta4_status.failed", error=str(e))
+            return web.Response(text="Error fetching meta4 status", status=500)
     
     async def handle_queue(self, request):
         """Handle download queue request."""

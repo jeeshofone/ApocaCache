@@ -7,7 +7,7 @@ import os
 import sqlite3
 from datetime import datetime
 import structlog
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Set
 
 log = structlog.get_logger()
 
@@ -41,12 +41,54 @@ class DatabaseManager:
                 )
                 """)
                 
+                # Create meta4 download status table
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meta4_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    total_files INTEGER DEFAULT 0,
+                    processed_files INTEGER DEFAULT 0,
+                    last_updated TIMESTAMP,
+                    is_complete BOOLEAN DEFAULT 0
+                )
+                """)
+                
                 conn.commit()
                 log.info("database.initialized", path=self.db_path)
                 
         except Exception as e:
             log.error("database.init_failed", error=str(e))
             raise
+    
+    async def batch_update_meta4_info(self, updates: List[Dict]):
+        """Update multiple meta4 file records in a single transaction."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                for meta4_data in updates:
+                    mirrors = "|".join(meta4_data.get("mirrors", []))
+                    cursor.execute("""
+                    INSERT OR REPLACE INTO meta4_files 
+                    (book_id, file_name, file_size, md5_hash, sha1_hash, sha256_hash, 
+                    mirrors, last_updated, meta4_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        meta4_data["book_id"],
+                        meta4_data.get("file_name"),
+                        meta4_data.get("file_size", 0),
+                        meta4_data.get("md5_hash"),
+                        meta4_data.get("sha1_hash"),
+                        meta4_data.get("sha256_hash"),
+                        mirrors,
+                        datetime.now().isoformat(),
+                        meta4_data.get("meta4_url")
+                    ))
+                
+                conn.commit()
+                log.info("database.batch_update_complete", count=len(updates))
+                
+        except Exception as e:
+            log.error("database.batch_update_failed", error=str(e))
     
     async def update_meta4_info(self, book_id: str, meta4_data: Dict):
         """Update or insert meta4 file information."""
@@ -144,6 +186,68 @@ class DatabaseManager:
             log.error("database.get_all_failed", error=str(e))
             return []
     
+    def get_meta4_download_status(self) -> Dict:
+        """Get the current meta4 download status."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                SELECT total_files, processed_files, last_updated, is_complete
+                FROM meta4_status
+                ORDER BY id DESC LIMIT 1
+                """)
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "total_files": row[0],
+                        "processed_files": row[1],
+                        "last_updated": row[2],
+                        "is_complete": bool(row[3])
+                    }
+                return {
+                    "total_files": 0,
+                    "processed_files": 0,
+                    "last_updated": None,
+                    "is_complete": False
+                }
+                
+        except Exception as e:
+            log.error("database.status_get_failed", error=str(e))
+            return {
+                "total_files": 0,
+                "processed_files": 0,
+                "last_updated": None,
+                "is_complete": False
+            }
+    
+    def update_meta4_download_status(self, total: int, processed: int, is_complete: bool = False):
+        """Update the meta4 download status."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                INSERT INTO meta4_status 
+                (total_files, processed_files, last_updated, is_complete)
+                VALUES (?, ?, ?, ?)
+                """, (
+                    total,
+                    processed,
+                    datetime.now().isoformat(),
+                    is_complete
+                ))
+                
+                conn.commit()
+                log.info("database.status_updated",
+                        total=total,
+                        processed=processed,
+                        is_complete=is_complete)
+                
+        except Exception as e:
+            log.error("database.status_update_failed", error=str(e))
+    
     def cleanup_old_entries(self, days: int = 30):
         """Remove entries older than specified days."""
         try:
@@ -152,6 +256,11 @@ class DatabaseManager:
                 
                 cursor.execute("""
                 DELETE FROM meta4_files
+                WHERE last_updated < datetime('now', '-? days')
+                """, (days,))
+                
+                cursor.execute("""
+                DELETE FROM meta4_status
                 WHERE last_updated < datetime('now', '-? days')
                 """, (days,))
                 
