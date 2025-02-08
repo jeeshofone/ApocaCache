@@ -158,6 +158,10 @@ async def main():
         # Initialize managers
         content_manager = ContentManager(config)
         library_manager = LibraryManager(config)
+        
+        # Connect managers
+        content_manager.set_library_manager(library_manager)
+        
         web_server = WebServer(content_manager, config)
         
         # Pre-fetch library XML and content

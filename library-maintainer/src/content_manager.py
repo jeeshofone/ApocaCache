@@ -141,6 +141,7 @@ class ContentManager:
         self.library_xml_url = "https://download.kiwix.org/library/library_zim.xml"
         self.download_queue = asyncio.Queue()
         self.active_downloads = set()
+        self.library_manager = None  # Will be set by main service
         self._load_state()
         
         # Start download worker
@@ -152,6 +153,10 @@ class ContentManager:
                 language_filter=self.config.language_filter,
                 download_all=self.config.download_all)
     
+    def set_library_manager(self, library_manager):
+        """Set the library manager instance."""
+        self.library_manager = library_manager
+
     def _parse_size(self, size_str: str) -> int:
         """Parse a human-readable size string into bytes."""
         if not size_str or size_str == '-':
@@ -739,6 +744,26 @@ class ContentManager:
         except Exception as e:
             log.error("cleanup.failed", error=str(e))
 
+    async def _handle_successful_download(self, book: Dict, dest_path: str):
+        """Handle post-download tasks after a successful download."""
+        try:
+            # Update content state
+            self.content_state[book['name']] = {
+                'last_updated': datetime.now().isoformat(),
+                'path': dest_path,
+                'size': os.path.getsize(dest_path)
+            }
+            await self._save_state()
+            
+            # Update library.xml if library manager is available
+            if self.library_manager:
+                await self.library_manager.update_library()
+            else:
+                log.error("library_update.failed", error="Library manager not initialized")
+            
+        except Exception as e:
+            log.error("post_download.failed", error=str(e))
+
     async def queue_download(self, book: Dict):
         """Queue a book for download."""
         try:
@@ -757,11 +782,6 @@ class ContentManager:
                 if not mirrors:
                     log.error("download_worker.no_mirrors", book=book['name'])
                     return
-                
-                log.info("download_worker.meta4_parsed",
-                        book=book['name'],
-                        mirrors=len(mirrors),
-                        md5=md5_hash)
             
             # Use first mirror as primary URL
             url = mirrors[0] if mirrors else book['url']
@@ -792,6 +812,7 @@ class ContentManager:
                 
                 if success:
                     log.info("download_worker.success", book=book['name'])
+                    await self._handle_successful_download(book, dest_path)
                 else:
                     log.error("download_worker.failed", book=book['name'])
                     
