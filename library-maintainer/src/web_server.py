@@ -31,8 +31,9 @@ class WebServer:
         self.library_cache_time = None
         self.cache_ttl = 3600  # 1 hour cache TTL
         self.db = DatabaseManager(config.data_dir)
-        self.meta4_semaphore = asyncio.Semaphore(10)  # Limit concurrent meta4 downloads
+        self.meta4_semaphore = asyncio.Semaphore(100)  # Increased to 100 concurrent downloads
         self.is_updating_meta4 = False
+        self.successful_meta4_downloads = 0
         
     def setup_routes(self):
         """Setup web server routes."""
@@ -61,6 +62,7 @@ class WebServer:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as response:
                         if response.status != 200:
+                            log.error("meta4_download.failed", url=url, status=response.status)
                             return {}
                         
                         content = await response.text()
@@ -69,6 +71,7 @@ class WebServer:
                         # Extract file information
                         file_elem = root.find(".//{urn:ietf:params:xml:ns:metalink}file")
                         if file_elem is None:
+                            log.error("meta4_parse.no_file_element", url=url)
                             return {}
                         
                         # Get file name
@@ -91,6 +94,11 @@ class WebServer:
                             if url_elem.text:
                                 mirrors.append(url_elem.text)
                         
+                        self.successful_meta4_downloads += 1
+                        if self.successful_meta4_downloads % 10 == 0:  # Log every 10 successful downloads
+                            log.info("meta4_download.progress", 
+                                   successful_downloads=self.successful_meta4_downloads)
+                        
                         return {
                             "file_name": file_name,
                             "file_size": file_size,
@@ -111,6 +119,7 @@ class WebServer:
             return
             
         self.is_updating_meta4 = True
+        self.successful_meta4_downloads = 0
         try:
             # Get library data
             library_root = await self.content_manager._fetch_library_xml()
@@ -131,8 +140,8 @@ class WebServer:
             processed_files = 0
             self.db.update_meta4_download_status(total_files, processed_files)
             
-            # Process meta4 files in batches
-            batch_size = 10
+            # Process meta4 files in larger batches
+            batch_size = 100  # Increased batch size
             for i in range(0, len(books), batch_size):
                 batch = books[i:i+batch_size]
                 tasks = []
@@ -162,7 +171,8 @@ class WebServer:
             self.db.update_meta4_download_status(total_files, processed_files, True)
             log.info("meta4_update.complete", 
                     total=total_files, 
-                    processed=processed_files)
+                    successful=self.successful_meta4_downloads,
+                    failed=total_files - self.successful_meta4_downloads)
             
         except Exception as e:
             log.error("meta4_update.failed", error=str(e))
