@@ -95,8 +95,8 @@ class WebServer:
                                 mirrors.append(url_elem.text)
                         
                         self.successful_meta4_downloads += 1
-                        if self.successful_meta4_downloads % 10 == 0:  # Log every 10 successful downloads
-                            log.info("meta4_download.progress", 
+                        if self.successful_meta4_downloads % 25 == 0:  # Log every 25 successful downloads
+                            log.info("meta4_download.status", 
                                    successful_downloads=self.successful_meta4_downloads)
                         
                         return {

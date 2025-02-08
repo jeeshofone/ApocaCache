@@ -274,7 +274,6 @@ class ContentManager:
             Tuple of (mirror_urls, md5_hash)
         """
         try:
-            log.info("meta4.fetching", url=url)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
@@ -296,7 +295,6 @@ class ContentManager:
                     if hash_elem is not None and hash_elem.text:
                         md5_hash = hash_elem.text
                     
-                    log.info("meta4.parsed", mirrors=len(mirrors), md5=md5_hash)
                     return mirrors, md5_hash
         except Exception as e:
             log.error("meta4.fetch_failed", error=str(e))
