@@ -5,6 +5,7 @@ Handles caching of meta4 file information in SQLite.
 
 import os
 import sqlite3
+import json
 from datetime import datetime
 import structlog
 from typing import Dict, Optional, List, Set
@@ -357,3 +358,123 @@ class DatabaseManager:
                      error=str(e))
             # On error, assume update needed
             return True
+
+    def get_meta4_info(self, book_id: str) -> Optional[Dict]:
+        """Get meta4 info for a book from the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT * FROM meta4_files WHERE book_id = ?',
+                    (book_id,)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    # Convert row to dictionary using column names
+                    columns = [desc[0] for desc in cursor.description]
+                    data = dict(zip(columns, row))
+                    
+                    # Parse JSON fields
+                    if data.get('mirrors'):
+                        data['mirrors'] = json.loads(data['mirrors'])
+                    if data.get('tags'):
+                        data['tags'] = json.loads(data['tags'])
+                    
+                    return data
+                return None
+                
+        except Exception as e:
+            log.error("database.get_meta4_info_failed", 
+                     book_id=book_id, 
+                     error=str(e))
+            return None
+    
+    def batch_update_meta4_info(self, updates: List[Dict]):
+        """Batch update meta4 info for multiple books."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                for update in updates:
+                    # Convert lists/dicts to JSON strings
+                    if 'mirrors' in update:
+                        update['mirrors'] = json.dumps(update['mirrors'])
+                    if 'tags' in update:
+                        update['tags'] = json.dumps(update['tags'])
+                    
+                    # Set last_updated timestamp
+                    update['last_updated'] = datetime.now().isoformat()
+                    
+                    # Prepare column names and placeholders
+                    columns = ', '.join(update.keys())
+                    placeholders = ', '.join(['?' for _ in update])
+                    
+                    # Prepare UPDATE clause
+                    update_clause = ', '.join([f"{k} = ?" for k in update.keys()])
+                    
+                    # Use UPSERT (INSERT OR REPLACE)
+                    cursor.execute(f'''
+                        INSERT OR REPLACE INTO meta4_files ({columns})
+                        VALUES ({placeholders})
+                    ''', list(update.values()))
+                
+                conn.commit()
+                log.info("database.batch_update_complete", 
+                        updates=len(updates))
+                
+        except Exception as e:
+            log.error("database.batch_update_failed", error=str(e))
+            raise
+    
+    def update_download_status(self, book_id: str, status: str, local_path: Optional[str] = None):
+        """Update the download status and local path for a book."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                if local_path:
+                    cursor.execute('''
+                        UPDATE meta4_files 
+                        SET download_status = ?, local_path = ?, last_updated = ?
+                        WHERE book_id = ?
+                    ''', (status, local_path, datetime.now().isoformat(), book_id))
+                else:
+                    cursor.execute('''
+                        UPDATE meta4_files 
+                        SET download_status = ?, last_updated = ?
+                        WHERE book_id = ?
+                    ''', (status, datetime.now().isoformat(), book_id))
+                conn.commit()
+                
+        except Exception as e:
+            log.error("database.update_status_failed", 
+                     book_id=book_id, 
+                     error=str(e))
+            raise
+    
+    def get_all_books(self) -> List[Dict]:
+        """Get all books from the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM meta4_files')
+                
+                books = []
+                columns = [desc[0] for desc in cursor.description]
+                
+                for row in cursor.fetchall():
+                    book = dict(zip(columns, row))
+                    
+                    # Parse JSON fields
+                    if book.get('mirrors'):
+                        book['mirrors'] = json.loads(book['mirrors'])
+                    if book.get('tags'):
+                        book['tags'] = json.loads(book['tags'])
+                    
+                    books.append(book)
+                
+                return books
+                
+        except Exception as e:
+            log.error("database.get_all_books_failed", error=str(e))
+            return []

@@ -243,7 +243,7 @@ class WebServer:
             self.is_updating_meta4 = False
     
     async def get_library_xml(self) -> Optional[List[Dict]]:
-        """Get the library XML content, using cache if available."""
+        """Get the library XML content, using database for all metadata and state."""
         now = datetime.now().timestamp()
         
         # Return cached data if still valid
@@ -252,7 +252,7 @@ class WebServer:
                 return self.library_cache
         
         try:
-            # Fetch fresh data
+            # Fetch fresh data from library XML for basic structure
             library_root = await self.content_manager._fetch_library_xml()
             if not library_root:
                 return None
@@ -261,28 +261,34 @@ class WebServer:
             books = []
             for book in library_root.findall(".//book"):
                 try:
+                    book_id = book.get('id', '')
+                    
+                    # Get metadata from database
+                    meta4_info = self.db.get_meta4_info(book_id)
+                    if not meta4_info:
+                        continue  # Skip books without metadata in database
+                    
+                    # Construct book data primarily from database
                     book_data = {
-                        'id': book.get('id', ''),
+                        'id': book_id,
                         'url': book.get('url', ''),
-                        'title': book.get('title', ''),
-                        'description': book.get('description', ''),
-                        'language': book.get('language', ''),
-                        'creator': book.get('creator', ''),
-                        'publisher': book.get('publisher', ''),
-                        'name': book.get('name', ''),
-                        'date': book.get('date', ''),
-                        'tags': book.get('tags', ''),
-                        'favicon': book.get('favicon', ''),
-                        'mediaCount': int(book.get('mediaCount', 0)),
-                        'articleCount': int(book.get('articleCount', 0))
+                        'title': meta4_info.get('title', ''),
+                        'description': meta4_info.get('description', ''),
+                        'language': meta4_info.get('language', ''),
+                        'creator': meta4_info.get('creator', ''),
+                        'publisher': meta4_info.get('publisher', ''),
+                        'name': meta4_info.get('name', ''),
+                        'date': meta4_info.get('book_date', ''),
+                        'tags': meta4_info.get('tags', ''),
+                        'favicon': meta4_info.get('favicon', ''),
+                        'mediaCount': meta4_info.get('media_count', 0),
+                        'articleCount': meta4_info.get('article_count', 0),
+                        'size': meta4_info.get('file_size', 0),
+                        'mirrors': meta4_info.get('mirrors', []),
+                        'last_updated': meta4_info.get('last_updated', '')
                     }
                     
-                    # Check if we have cached meta4 info
-                    meta4_info = self.db.get_meta4_info(book_data['id'])
-                    if meta4_info:
-                        book_data['size'] = meta4_info['file_size']
-                    
-                    # Check if file is downloaded
+                    # Check if file is downloaded by looking for the ZIM file
                     filename = os.path.basename(book_data['url'].replace('.meta4', '.zim'))
                     for root, _, files in os.walk(self.config.data_dir):
                         if filename in files:
@@ -295,7 +301,9 @@ class WebServer:
                     books.append(book_data)
                     
                 except Exception as e:
-                    log.error("library_parse.book_failed", error=str(e))
+                    log.error("library_parse.book_failed", 
+                            book_id=book_id, 
+                            error=str(e))
                     continue
             
             # Update cache

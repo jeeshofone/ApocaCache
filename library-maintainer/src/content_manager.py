@@ -788,6 +788,17 @@ class ContentManager:
             }
             await self._save_state()
             
+            # Update database with download status
+            if self.library_manager and self.library_manager.db:
+                self.library_manager.db.update_download_status(
+                    book_id=book['name'],
+                    status='downloaded',
+                    local_path=dest_path
+                )
+                log.info("database.download_status_updated", 
+                        book=book['name'],
+                        status='downloaded')
+            
             # Update library.xml if library manager is available
             if self.library_manager:
                 await self.library_manager.update_library()
@@ -795,7 +806,7 @@ class ContentManager:
                 log.error("library_update.failed", error="Library manager not initialized")
             
             # Clear web server cache to force refresh of download status
-            if hasattr(self, 'web_server'):
+            if hasattr(self, 'web_server') and self.web_server:
                 self.web_server.library_cache = None
                 self.web_server.library_cache_time = None
                 log.info("web_server.cache_cleared", book=book['name'])
