@@ -58,6 +58,10 @@ class WebServer:
     
     async def _parse_meta4_file(self, url: str) -> Dict:
         """Parse meta4 file to extract size and hash information."""
+        if not url:
+            log.error("meta4_parse.invalid_url", url=url)
+            return {}
+            
         try:
             async with self.meta4_semaphore:
                 async with aiohttp.ClientSession() as session:
@@ -80,7 +84,7 @@ class WebServer:
                         
                         # Get file size
                         size_elem = file_elem.find(".//{urn:ietf:params:xml:ns:metalink}size")
-                        file_size = int(size_elem.text) if size_elem is not None else 0
+                        file_size = int(size_elem.text) if size_elem is not None and size_elem.text else 0
                         
                         # Get hashes
                         hashes = {}
@@ -97,10 +101,18 @@ class WebServer:
                         
                         # Get additional metadata from parent XML
                         parent_book = root.find(".//book")
+                        metadata = {
+                            "media_count": "0", "article_count": "0",
+                            "favicon": "", "favicon_mime_type": "",
+                            "title": "", "description": "",
+                            "language": "", "creator": "",
+                            "publisher": "", "name": "",
+                            "tags": "", "date": "",
+                            "size": "0"
+                        }
+                        
                         if parent_book is not None:
                             # Extract all available metadata
-                            metadata = {}
-                            
                             # Get attributes first
                             metadata.update({
                                 "media_count": parent_book.get("mediaCount", "0"),
@@ -115,26 +127,6 @@ class WebServer:
                                 tag = elem.tag.split('}')[-1].lower()  # Handle namespaced tags
                                 if elem.text:
                                     metadata[tag] = elem.text.strip()
-                            
-                            # Ensure all fields have defaults
-                            metadata.setdefault("title", "")
-                            metadata.setdefault("description", "")
-                            metadata.setdefault("language", "")
-                            metadata.setdefault("creator", "")
-                            metadata.setdefault("publisher", "")
-                            metadata.setdefault("name", "")
-                            metadata.setdefault("tags", "")
-                            metadata.setdefault("date", "")
-                        else:
-                            metadata = {
-                                "media_count": "0", "article_count": "0",
-                                "favicon": "", "favicon_mime_type": "",
-                                "title": "", "description": "",
-                                "language": "", "creator": "",
-                                "publisher": "", "name": "",
-                                "tags": "", "date": "",
-                                "size": "0"
-                            }
                         
                         self.successful_meta4_downloads += 1
                         if self.successful_meta4_downloads % 25 == 0:
@@ -160,9 +152,12 @@ class WebServer:
                             "publisher": metadata.get("publisher", ""),
                             "name": metadata.get("name", ""),
                             "tags": metadata.get("tags", ""),
-                            "book_date": metadata.get("date", "")  # Add book_date to returned data
+                            "book_date": metadata.get("date", "")
                         }
                         
+        except ET.ParseError as e:
+            log.error("meta4_parse.xml_error", url=url, error=str(e))
+            return {}
         except Exception as e:
             log.error("meta4_parse.failed", url=url, error=str(e))
             return {}

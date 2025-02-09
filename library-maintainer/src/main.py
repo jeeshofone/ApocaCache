@@ -173,20 +173,20 @@ async def initialize_database(config: Config, content_manager: ContentManager, d
                     # Extract book data
                     book_data = {
                         'id': book.get('id', ''),
-                        'url': book.find('url').text if book.find('url') is not None else '',
+                        'url': book.find('.//url').text if book.find('.//url') is not None else '',
                         'size': int(book.get('size', 0)),
                         'media_count': int(book.get('mediaCount', 0)),
                         'article_count': int(book.get('articleCount', 0)),
                         'favicon': book.get('favicon', ''),
                         'favicon_mime_type': book.get('faviconMimeType', ''),
-                        'title': book.find('title').text if book.find('title') is not None else '',
-                        'description': book.find('description').text if book.find('description') is not None else '',
-                        'language': book.find('language').text if book.find('language') is not None else '',
-                        'creator': book.find('creator').text if book.find('creator') is not None else '',
-                        'publisher': book.find('publisher').text if book.find('publisher') is not None else '',
-                        'name': book.find('name').text if book.find('name') is not None else '',
-                        'tags': book.find('tags').text if book.find('tags') is not None else '',
-                        'book_date': book.find('date').text if book.find('date') is not None else '',
+                        'title': book.find('.//title').text if book.find('.//title') is not None else '',
+                        'description': book.find('.//description').text if book.find('.//description') is not None else '',
+                        'language': book.find('.//language').text if book.find('.//language') is not None else '',
+                        'creator': book.find('.//creator').text if book.find('.//creator') is not None else '',
+                        'publisher': book.find('.//publisher').text if book.find('.//publisher') is not None else '',
+                        'name': book.find('.//name').text if book.find('.//name') is not None else '',
+                        'tags': book.find('.//tags').text if book.find('.//tags') is not None else '',
+                        'book_date': book.find('.//date').text if book.find('.//date') is not None else '',
                         'needs_meta4_update': True
                     }
                     
@@ -228,7 +228,7 @@ async def initialize_database(config: Config, content_manager: ContentManager, d
                 tasks = []
                 
                 for book in batch:
-                    if book['url'].endswith('.meta4'):
+                    if book['url'] and book['url'].endswith('.meta4'):
                         task = asyncio.create_task(content_manager._fetch_meta4_file(book['url']))
                         tasks.append((book['id'], task))
                 
