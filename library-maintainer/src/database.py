@@ -26,12 +26,26 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 
                 # Create meta4 files table
-                # Drop existing table if it exists
-                cursor.execute("DROP TABLE IF EXISTS meta4_files")
-                
-                # Create fresh table with all columns
+                # Check if we need to migrate the schema
                 cursor.execute("""
-                CREATE TABLE meta4_files (
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='meta4_files'
+                """)
+                
+                table_exists = cursor.fetchone() is not None
+                
+                if table_exists:
+                    # Check if we need to add the book_date column
+                    cursor.execute("PRAGMA table_info(meta4_files)")
+                    columns = {row[1] for row in cursor.fetchall()}
+                    
+                    if 'book_date' not in columns:
+                        log.info("database.adding_book_date_column")
+                        cursor.execute("ALTER TABLE meta4_files ADD COLUMN book_date TEXT")
+                else:
+                    # Create new table with all columns
+                    cursor.execute("""
+                    CREATE TABLE meta4_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     book_id TEXT UNIQUE,
                     file_name TEXT,
