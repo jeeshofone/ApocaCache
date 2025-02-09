@@ -142,6 +142,7 @@ class ContentManager:
         self.download_queue = asyncio.Queue()
         self.active_downloads = set()
         self.library_manager = None  # Will be set by main service
+        self.web_server = None  # Will be set by main service
         self._load_state()
         
         # Start download worker
@@ -156,6 +157,10 @@ class ContentManager:
     def set_library_manager(self, library_manager):
         """Set the library manager instance."""
         self.library_manager = library_manager
+        
+    def set_web_server(self, web_server):
+        """Set the web server instance."""
+        self.web_server = web_server
 
     def _parse_size(self, size_str: str) -> int:
         """Parse a human-readable size string into bytes."""
@@ -788,6 +793,12 @@ class ContentManager:
                 await self.library_manager.update_library()
             else:
                 log.error("library_update.failed", error="Library manager not initialized")
+            
+            # Clear web server cache to force refresh of download status
+            if hasattr(self, 'web_server'):
+                self.web_server.library_cache = None
+                self.web_server.library_cache_time = None
+                log.info("web_server.cache_cleared", book=book['name'])
             
         except Exception as e:
             log.error("post_download.failed", error=str(e))

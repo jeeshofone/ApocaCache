@@ -163,6 +163,7 @@ async def main():
         content_manager.set_library_manager(library_manager)
         
         web_server = WebServer(content_manager, config)
+        content_manager.set_web_server(web_server)  # Connect web server to content manager
         
         # Pre-fetch library XML and content
         log.info("startup.prefetching_library_xml")
