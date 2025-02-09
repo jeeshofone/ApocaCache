@@ -34,32 +34,41 @@ class LibraryManager:
         filename = os.path.basename(filepath)
         name_parts = filename.replace('.zim', '').split('_')
         
+        # Extract category from filepath
+        category = os.path.basename(os.path.dirname(filepath))
+        
         # Extract name and language from filename
         if len(name_parts) > 1:
             name = '_'.join(name_parts[:-1])  # Everything except date
             language = name_parts[1] if len(name_parts) > 1 else 'eng'
-            creator = name_parts[0]
             date = name_parts[-1]
+            
+            # Try to extract a meaningful title
+            if '.' in name_parts[0]:
+                title_parts = name_parts[0].split('.')
+                title = ' '.join(part.capitalize() for part in title_parts)
+            else:
+                title = name_parts[0].replace('_', ' ').title()
         else:
             name = name_parts[0]
             language = 'eng'
-            creator = name_parts[0]
             date = ''
+            title = name.replace('_', ' ').title()
         
         # Provide all required metadata fields with defaults
         return {
             'name': name,
             'date': date,
             'language': language,
-            'creator': creator,
+            'creator': category,  # Use category as creator
             'publisher': 'Kiwix',
-            'description': f'Kiwix ZIM file for {name}',
-            'title': name.replace('_', ' ').title(),  # Convert underscores to spaces and capitalize
+            'description': f'Kiwix ZIM file for {title}',
+            'title': title,
             'media_count': '0',
             'article_count': '0',
             'favicon': '',
             'favicon_mime_type': '',
-            'tags': '',
+            'tags': f'_category:{category};_ftindex:yes',  # Add basic tags
             'size': str(os.path.getsize(filepath))
         }
     
@@ -117,49 +126,57 @@ class LibraryManager:
             for filepath, filename in all_files:
                 base_name = self._get_base_name(filename)
                 if processed_base_names[base_name] == filename:
-                    # Get relative path from data directory
-                    rel_path = os.path.relpath(filepath, self.config.data_dir)
-                    size = os.path.getsize(filepath)
-                    total_size += size
-                    
-                    # Get metadata
-                    metadata = self._get_zim_metadata(filepath)
-                    
-                    # Create book element with all attributes
-                    book = ET.SubElement(root, 'book')
-                    # Generate ID from filename if not present
-                    book_id = metadata.get('id', os.path.splitext(os.path.basename(filepath))[0])
-                    book.set('id', book_id)
-                    book.set('path', rel_path)
-                    book.set('size', str(size))
-                    book.set('mediaCount', metadata.get('media_count', '0'))
-                    book.set('articleCount', metadata.get('article_count', '0'))
-                    book.set('favicon', metadata.get('favicon', ''))
-                    book.set('faviconMimeType', metadata.get('favicon_mime_type', ''))
-                    
-                    # Add metadata elements
-                    ET.SubElement(book, 'title').text = metadata.get('title', '')
-                    ET.SubElement(book, 'description').text = metadata.get('description', '')
-                    ET.SubElement(book, 'language').text = metadata.get('language', '')
-                    ET.SubElement(book, 'creator').text = metadata.get('creator', '')
-                    ET.SubElement(book, 'publisher').text = metadata.get('publisher', '')
-                    ET.SubElement(book, 'name').text = metadata.get('name', '')
-                    ET.SubElement(book, 'tags').text = metadata.get('tags', '')
-                    ET.SubElement(book, 'date').text = metadata.get('date', '')
-                    
-                    # Add URL for source
-                    if os.getenv("TESTING", "false").lower() == "true":
-                        url = "https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim"
-                    else:
-                        url = f"{self.config.base_url}{metadata['creator']}/{filename}"
-                    ET.SubElement(book, 'url').text = url
-                    book_count += 1
-                    
-                    log.debug("library_update.added_book",
-                            title=metadata.get('title', ''),
-                            language=metadata.get('language', ''),
-                            size=size,
-                            version=metadata.get('date', ''))
+                    try:
+                        # Get relative path from data directory
+                        rel_path = os.path.relpath(filepath, self.config.data_dir)
+                        size = os.path.getsize(filepath)
+                        total_size += size
+                        
+                        # Get metadata
+                        metadata = self._get_zim_metadata(filepath)
+                        
+                        # Create book element with all attributes
+                        book = ET.SubElement(root, 'book')
+                        # Generate ID from filename if not present
+                        book_id = metadata.get('id', os.path.splitext(os.path.basename(filepath))[0])
+                        book.set('id', book_id)
+                        book.set('path', rel_path)
+                        book.set('size', str(size))
+                        book.set('mediaCount', metadata.get('media_count', '0'))
+                        book.set('articleCount', metadata.get('article_count', '0'))
+                        book.set('favicon', metadata.get('favicon', ''))
+                        book.set('faviconMimeType', metadata.get('favicon_mime_type', ''))
+                        
+                        # Add metadata elements
+                        ET.SubElement(book, 'title').text = metadata.get('title', '')
+                        ET.SubElement(book, 'description').text = metadata.get('description', '')
+                        ET.SubElement(book, 'language').text = metadata.get('language', '')
+                        ET.SubElement(book, 'creator').text = metadata.get('creator', '')
+                        ET.SubElement(book, 'publisher').text = metadata.get('publisher', '')
+                        ET.SubElement(book, 'name').text = metadata.get('name', '')
+                        ET.SubElement(book, 'tags').text = metadata.get('tags', '')
+                        ET.SubElement(book, 'date').text = metadata.get('date', '')
+                        
+                        # Add URL for source
+                        if os.getenv("TESTING", "false").lower() == "true":
+                            url = "https://github.com/openzim/zim-tools/blob/main/test/data/zimfiles/good.zim"
+                        else:
+                            # Extract category from filepath
+                            category = os.path.basename(os.path.dirname(filepath))
+                            url = f"{self.config.base_url}{category}/{filename}"
+                        ET.SubElement(book, 'url').text = url
+                        book_count += 1
+                        
+                        log.debug("library_update.added_book",
+                                title=metadata.get('title', ''),
+                                language=metadata.get('language', ''),
+                                size=size,
+                                version=metadata.get('date', ''))
+                    except Exception as book_error:
+                        log.error("library_update.book_failed",
+                                filename=filename,
+                                error=str(book_error))
+                        continue
             
             # Format XML with proper indentation
             xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
