@@ -143,17 +143,17 @@ class WebServer:
                             "sha256_hash": hashes.get("sha-256", ""),
                             "mirrors": mirrors,
                             "meta4_url": url,
-                            "media_count": int(media_count),
-                            "article_count": int(article_count),
-                            "favicon": favicon,
-                            "favicon_mime_type": favicon_mime_type,
-                            "title": title,
-                            "description": description,
-                            "language": language,
-                            "creator": creator,
-                            "publisher": publisher,
-                            "name": name,
-                            "tags": tags
+                            "media_count": int(metadata.get("media_count", 0)),
+                            "article_count": int(metadata.get("article_count", 0)),
+                            "favicon": metadata.get("favicon", ""),
+                            "favicon_mime_type": metadata.get("favicon_mime_type", ""),
+                            "title": metadata.get("title", ""),
+                            "description": metadata.get("description", ""),
+                            "language": metadata.get("language", ""),
+                            "creator": metadata.get("creator", ""),
+                            "publisher": metadata.get("publisher", ""),
+                            "name": metadata.get("name", ""),
+                            "tags": metadata.get("tags", "")
                         }
                         
         except Exception as e:
