@@ -318,17 +318,45 @@ class ContentManager:
             log.error("md5_fetch.error", url=url, error=str(e))
             return None
 
-    def _calculate_file_md5(self, filepath: str) -> Optional[str]:
-        """Calculate MD5 hash of a file."""
+    def _calculate_file_md5(self, filepath: str, chunk_size: int = 1024*1024) -> Optional[str]:
+        """Calculate MD5 hash of a file.
+        
+        Args:
+            filepath: Path to file to hash
+            chunk_size: Size of chunks to read (default 1MB)
+            
+        Returns:
+            MD5 hash as hex string, or None on error
+        """
         try:
             log.info("md5_calculate.starting", filepath=filepath)
             md5_hash = hashlib.md5()
+            file_size = os.path.getsize(filepath)
+            processed = 0
+            
             with open(filepath, "rb") as f:
-                # Read the file in chunks to handle large files
-                for chunk in iter(lambda: f.read(4096), b""):
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
                     md5_hash.update(chunk)
+                    processed += len(chunk)
+                    
+                    # Log progress every 5%
+                    if file_size > 0:
+                        progress = (processed / file_size) * 100
+                        if progress % 5 < (chunk_size / file_size) * 100:
+                            log.info("md5_calculate.progress", 
+                                   filepath=filepath,
+                                   progress=f"{progress:.1f}%",
+                                   processed=processed,
+                                   total=file_size)
+                            
             result = md5_hash.hexdigest()
-            log.info("md5_calculate.complete", filepath=filepath, md5=result)
+            log.info("md5_calculate.complete", 
+                    filepath=filepath, 
+                    md5=result,
+                    size=file_size)
             return result
         except Exception as e:
             log.error("md5_calculate.error", filepath=filepath, error=str(e))
