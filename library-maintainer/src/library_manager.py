@@ -34,13 +34,33 @@ class LibraryManager:
         filename = os.path.basename(filepath)
         name_parts = filename.replace('.zim', '').split('_')
         
+        # Extract name and language from filename
+        if len(name_parts) > 1:
+            name = '_'.join(name_parts[:-1])  # Everything except date
+            language = name_parts[1] if len(name_parts) > 1 else 'eng'
+            creator = name_parts[0]
+            date = name_parts[-1]
+        else:
+            name = name_parts[0]
+            language = 'eng'
+            creator = name_parts[0]
+            date = ''
+        
+        # Provide all required metadata fields with defaults
         return {
-            'name': '_'.join(name_parts[:-1]) if len(name_parts) > 1 else name_parts[0],
-            'date': name_parts[-1] if len(name_parts) > 1 else '',
-            'language': name_parts[1] if len(name_parts) > 1 else 'eng',
-            'creator': name_parts[0],
+            'name': name,
+            'date': date,
+            'language': language,
+            'creator': creator,
             'publisher': 'Kiwix',
-            'description': f'Kiwix ZIM file for {name_parts[0]}'
+            'description': f'Kiwix ZIM file for {name}',
+            'title': name.replace('_', ' ').title(),  # Convert underscores to spaces and capitalize
+            'media_count': '0',
+            'article_count': '0',
+            'favicon': '',
+            'favicon_mime_type': '',
+            'tags': '',
+            'size': str(os.path.getsize(filepath))
         }
     
     def _get_base_name(self, filename: str) -> str:
@@ -64,6 +84,7 @@ class LibraryManager:
         """Update the library.xml file with current content."""
         start_time = time.time()
         log.info("library_update.starting")
+        temp_file = None
         
         try:
             # Create root element
@@ -111,20 +132,20 @@ class LibraryManager:
                     book.set('id', book_id)
                     book.set('path', rel_path)
                     book.set('size', str(size))
-                    book.set('mediaCount', str(metadata.get('media_count', 0)))
-                    book.set('articleCount', str(metadata.get('article_count', 0)))
+                    book.set('mediaCount', metadata.get('media_count', '0'))
+                    book.set('articleCount', metadata.get('article_count', '0'))
                     book.set('favicon', metadata.get('favicon', ''))
                     book.set('faviconMimeType', metadata.get('favicon_mime_type', ''))
                     
                     # Add metadata elements
-                    ET.SubElement(book, 'title').text = metadata['title']
-                    ET.SubElement(book, 'description').text = metadata['description']
-                    ET.SubElement(book, 'language').text = metadata['language']
-                    ET.SubElement(book, 'creator').text = metadata['creator']
-                    ET.SubElement(book, 'publisher').text = metadata['publisher']
-                    ET.SubElement(book, 'name').text = metadata['name']
-                    ET.SubElement(book, 'tags').text = metadata['tags']
-                    ET.SubElement(book, 'date').text = metadata['date']
+                    ET.SubElement(book, 'title').text = metadata.get('title', '')
+                    ET.SubElement(book, 'description').text = metadata.get('description', '')
+                    ET.SubElement(book, 'language').text = metadata.get('language', '')
+                    ET.SubElement(book, 'creator').text = metadata.get('creator', '')
+                    ET.SubElement(book, 'publisher').text = metadata.get('publisher', '')
+                    ET.SubElement(book, 'name').text = metadata.get('name', '')
+                    ET.SubElement(book, 'tags').text = metadata.get('tags', '')
+                    ET.SubElement(book, 'date').text = metadata.get('date', '')
                     
                     # Add URL for source
                     if os.getenv("TESTING", "false").lower() == "true":
@@ -135,10 +156,10 @@ class LibraryManager:
                     book_count += 1
                     
                     log.debug("library_update.added_book",
-                            title=metadata['name'],
-                            language=metadata['language'],
+                            title=metadata.get('title', ''),
+                            language=metadata.get('language', ''),
                             size=size,
-                            version=metadata['date'])
+                            version=metadata.get('date', ''))
             
             # Format XML with proper indentation
             xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
@@ -165,8 +186,12 @@ class LibraryManager:
             log.error("library_update.failed", 
                      error=str(e),
                      traceback=traceback.format_exc())
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as cleanup_error:
+                    log.error("library_update.cleanup_failed", 
+                             error=str(cleanup_error))
             raise  # Re-raise to ensure the error is properly handled
     
     async def cleanup(self):
