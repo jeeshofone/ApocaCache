@@ -44,7 +44,7 @@ services:
     volumes:
       - ./kiwix:/data:ro
     user: "1000:1000"
-    command: --library /data/library.xml --verbose
+    command: --library /data/library.xml -M
     depends_on:
       library-maintainer:
         condition: service_healthy
