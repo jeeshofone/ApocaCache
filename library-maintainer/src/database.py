@@ -149,7 +149,6 @@ class DatabaseManager:
                     sha256_hash, piece_length, last_meta4_update,
                     meta4_url
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING id
                 """, (
                     book_id,
                     json.dumps(meta4_data.get('mirrors', [])),
@@ -161,17 +160,6 @@ class DatabaseManager:
                     meta4_data.get('meta4_url', '')
                 ))
                 
-                meta4_id = cursor.fetchone()[0]
-                
-                # Update pieces if present
-                if 'pieces' in meta4_data:
-                    cursor.execute("DELETE FROM pieces WHERE meta4_id = ?", (meta4_id,))
-                    for idx, piece_hash in enumerate(meta4_data['pieces']):
-                        cursor.execute("""
-                        INSERT INTO pieces (meta4_id, piece_hash, piece_index)
-                        VALUES (?, ?, ?)
-                        """, (meta4_id, piece_hash, idx))
-                
                 # Mark book as not needing meta4 update
                 cursor.execute("""
                 UPDATE books 
@@ -181,8 +169,7 @@ class DatabaseManager:
                 
                 conn.commit()
                 log.info("database.meta4_updated",
-                        book_id=book_id,
-                        meta4_id=meta4_id)
+                        book_id=book_id)
                 
         except Exception as e:
             log.error("database.update_meta4_failed",
@@ -233,21 +220,9 @@ class DatabaseManager:
                     meta4_columns = [desc[0] for desc in cursor.description]
                     meta4_data = dict(zip(meta4_columns, meta4_row))
                     
-                    # Get mirrors
-                    cursor.execute("""
-                    SELECT url FROM mirror_urls 
-                    WHERE meta4_id = ? 
-                    ORDER BY priority
-                    """, (meta4_data['id'],))
-                    meta4_data['mirrors'] = [row[0] for row in cursor.fetchall()]
-                    
-                    # Get pieces
-                    cursor.execute("""
-                    SELECT piece_hash FROM pieces 
-                    WHERE meta4_id = ? 
-                    ORDER BY piece_index
-                    """, (meta4_data['id'],))
-                    meta4_data['pieces'] = [row[0] for row in cursor.fetchall()]
+                    # Parse JSON fields
+                    if meta4_data.get('mirrors'):
+                        meta4_data['mirrors'] = json.loads(meta4_data['mirrors'])
                     
                     book_data['meta4_info'] = meta4_data
                 
