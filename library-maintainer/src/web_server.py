@@ -97,21 +97,38 @@ class WebServer:
                         # Get additional metadata from parent XML
                         parent_book = root.find(".//book")
                         if parent_book is not None:
-                            media_count = parent_book.get("mediaCount", "0")
-                            article_count = parent_book.get("articleCount", "0")
-                            favicon = parent_book.get("favicon", "")
-                            favicon_mime_type = parent_book.get("faviconMimeType", "")
-                            title = parent_book.get("title", "")
-                            description = parent_book.get("description", "")
-                            language = parent_book.get("language", "")
-                            creator = parent_book.get("creator", "")
-                            publisher = parent_book.get("publisher", "")
-                            name = parent_book.get("name", "")
-                            tags = parent_book.get("tags", "")
+                            # Extract all available metadata
+                            metadata = {
+                                "media_count": parent_book.get("mediaCount", "0"),
+                                "article_count": parent_book.get("articleCount", "0"),
+                                "favicon": parent_book.get("favicon", ""),
+                                "favicon_mime_type": parent_book.get("faviconMimeType", ""),
+                                "title": parent_book.get("title", ""),
+                                "description": parent_book.get("description", ""),
+                                "language": parent_book.get("language", ""),
+                                "creator": parent_book.get("creator", ""),
+                                "publisher": parent_book.get("publisher", ""),
+                                "name": parent_book.get("name", ""),
+                                "tags": parent_book.get("tags", ""),
+                                "date": parent_book.get("date", ""),
+                                "size": parent_book.get("size", "0")
+                            }
+                            
+                            # Look for additional metadata in child elements
+                            for elem in parent_book:
+                                tag = elem.tag.split('}')[-1]  # Handle namespaced tags
+                                if elem.text and not metadata.get(tag):
+                                    metadata[tag] = elem.text
                         else:
-                            media_count = article_count = "0"
-                            favicon = favicon_mime_type = title = description = ""
-                            language = creator = publisher = name = tags = ""
+                            metadata = {
+                                "media_count": "0", "article_count": "0",
+                                "favicon": "", "favicon_mime_type": "",
+                                "title": "", "description": "",
+                                "language": "", "creator": "",
+                                "publisher": "", "name": "",
+                                "tags": "", "date": "",
+                                "size": "0"
+                            }
                         
                         self.successful_meta4_downloads += 1
                         if self.successful_meta4_downloads % 25 == 0:
