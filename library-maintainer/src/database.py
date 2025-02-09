@@ -100,8 +100,10 @@ class DatabaseManager:
                     cursor.execute("""
                     INSERT OR REPLACE INTO meta4_files 
                     (book_id, file_name, file_size, md5_hash, sha1_hash, sha256_hash, 
-                    mirrors, last_updated, meta4_url)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mirrors, last_updated, meta4_url, book_date, media_count, article_count,
+                    favicon, favicon_mime_type, title, description, language, creator,
+                    publisher, name, tags)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         meta4_data["book_id"],
                         meta4_data.get("file_name"),
@@ -111,7 +113,19 @@ class DatabaseManager:
                         meta4_data.get("sha256_hash"),
                         mirrors,
                         datetime.now().isoformat(),
-                        meta4_data.get("meta4_url")
+                        meta4_data.get("meta4_url"),
+                        meta4_data.get("book_date"),
+                        meta4_data.get("media_count", 0),
+                        meta4_data.get("article_count", 0),
+                        meta4_data.get("favicon", ""),
+                        meta4_data.get("favicon_mime_type", ""),
+                        meta4_data.get("title", ""),
+                        meta4_data.get("description", ""),
+                        meta4_data.get("language", ""),
+                        meta4_data.get("creator", ""),
+                        meta4_data.get("publisher", ""),
+                        meta4_data.get("name", ""),
+                        meta4_data.get("tags", "")
                     ))
                 
                 conn.commit()
