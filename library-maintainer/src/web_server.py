@@ -126,15 +126,24 @@ class WebServer:
             if not library_root:
                 return
             
-            # Get all meta4 URLs
+            # Get all meta4 URLs and check dates
             books = []
             for book in library_root.findall(".//book"):
                 url = book.get('url', '')
                 if url.endswith('.meta4'):
-                    books.append({
-                        'id': book.get('id', ''),
-                        'url': url
-                    })
+                    book_id = book.get('id', '')
+                    book_date = book.get('date', '')
+                    
+                    # Only process if date has changed
+                    if self.db.needs_update(book_id, book_date):
+                        books.append({
+                            'id': book_id,
+                            'url': url,
+                            'date': book_date
+                        })
+                        log.info("meta4_update.book_changed",
+                                book_id=book_id,
+                                date=book_date)
             
             total_files = len(books)
             processed_files = 0
@@ -157,6 +166,7 @@ class WebServer:
                         meta4_data = await task
                         if meta4_data:
                             meta4_data['book_id'] = book_id
+                            meta4_data['book_date'] = book['date']
                             updates.append(meta4_data)
                     except Exception as e:
                         log.error("meta4_batch.failed", book_id=book_id, error=str(e))

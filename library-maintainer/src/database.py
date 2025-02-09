@@ -37,7 +37,8 @@ class DatabaseManager:
                     sha256_hash TEXT,
                     mirrors TEXT,
                     last_updated TIMESTAMP,
-                    meta4_url TEXT
+                    meta4_url TEXT,
+                    book_date TEXT
                 )
                 """)
                 
