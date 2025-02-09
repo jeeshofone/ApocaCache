@@ -224,14 +224,19 @@ async def initialize_database(config: Config, content_manager: ContentManager, d
                 
                 for book in batch:
                     if book['url'].endswith('.meta4'):
-                        task = asyncio.create_task(content_manager._parse_meta4_file(book['url']))
+                        task = asyncio.create_task(content_manager._fetch_meta4_file(book['url']))
                         tasks.append((book['id'], task))
                 
                 # Wait for batch to complete
                 for book_id, task in tasks:
                     try:
-                        meta4_data = await task
-                        if meta4_data:
+                        mirrors, md5_hash = await task
+                        if mirrors:
+                            meta4_data = {
+                                'mirrors': mirrors,
+                                'md5_hash': md5_hash,
+                                'meta4_url': book['url']
+                            }
                             db_manager.update_meta4_info(book_id, meta4_data)
                     except Exception as e:
                         log.error("database.meta4_processing_failed",

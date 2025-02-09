@@ -871,66 +871,76 @@ class ContentManager:
             try:
                 book, content_item = await self.download_queue.get()
                 
-                # Get book info from database
-                book_info = self.db.get_book_info(book['id'])
-                if not book_info or 'meta4_info' not in book_info:
-                    log.error("download_worker.no_meta4_info", book=book['name'])
-                    continue
-                
-                # Get mirrors and file info from database
-                meta4_info = book_info['meta4_info']
-                mirrors = meta4_info.get('mirrors', [])
-                if not mirrors:
-                    log.error("download_worker.no_mirrors", book=book['name'])
-                    continue
-                
-                # Use first mirror as primary URL
-                url = mirrors[0]
-                
-                # Create category subdirectory
-                category_dir = os.path.join(self.config.data_dir, content_item.category)
-                os.makedirs(category_dir, exist_ok=True)
-                
-                # Determine destination path
-                filename = os.path.basename(url)
-                if not filename.endswith('.zim'):
-                    filename = f"{book['name']}.zim"
-                
-                dest_path = os.path.join(category_dir, filename)
-                
                 try:
-                    # Download the file
-                    success = await self._download_file(
-                        url,
-                        dest_path,
-                        content_item,
-                        mirrors[1:],  # Rest of mirrors as fallbacks
-                        expected_md5=meta4_info.get('md5_hash'),
-                        expected_sha1=meta4_info.get('sha1_hash'),
-                        expected_sha256=meta4_info.get('sha256_hash')
-                    )
+                    # Get book info from database
+                    book_info = self.db.get_book_info(book['id'])
+                    if not book_info or 'meta4_info' not in book_info:
+                        log.error("download_worker.no_meta4_info", book=book['name'])
+                        continue
                     
-                    if success:
-                        # Update database status
-                        self.db.update_download_status(book['id'], 'downloaded', dest_path)
-                        log.info("download_worker.success", book=book['name'])
-                    else:
-                        # Update database status
-                        self.db.update_download_status(book['id'], 'failed', None)
-                        log.error("download_worker.failed", book=book['name'])
+                    # Get mirrors and file info from database
+                    meta4_info = book_info['meta4_info']
+                    mirrors = meta4_info.get('mirrors', [])
+                    if not mirrors:
+                        log.error("download_worker.no_mirrors", book=book['name'])
+                        continue
+                    
+                    # Use first mirror as primary URL
+                    url = mirrors[0]
+                    
+                    # Create category subdirectory
+                    category_dir = os.path.join(self.config.data_dir, content_item.category)
+                    os.makedirs(category_dir, exist_ok=True)
+                    
+                    # Determine destination path
+                    filename = os.path.basename(url)
+                    if not filename.endswith('.zim'):
+                        filename = f"{book['name']}.zim"
+                    
+                    dest_path = os.path.join(category_dir, filename)
+                    
+                    try:
+                        # Download the file
+                        success = await self._download_file(
+                            url,
+                            dest_path,
+                            content_item,
+                            mirrors[1:],  # Rest of mirrors as fallbacks
+                            meta4_info.get('md5_hash')
+                        )
                         
+                        if success:
+                            # Update database status
+                            self.db.update_download_status(book['id'], 'downloaded', dest_path)
+                            log.info("download_worker.success", book=book['name'])
+                        else:
+                            # Update database status
+                            self.db.update_download_status(book['id'], 'failed', None)
+                            log.error("download_worker.failed", book=book['name'])
+                            
+                    finally:
+                        # Remove from active downloads
+                        self.active_downloads.discard(book['name'])
+                        
+                except Exception as e:
+                    log.error("download_worker.failed", error=str(e))
+                    if 'book' in locals():
+                        self.active_downloads.discard(book.get('name', ''))
+                        self.db.update_download_status(book['id'], 'failed', None)
+                
                 finally:
-                    # Remove from active downloads
-                    self.active_downloads.discard(book['name'])
+                    # Mark task as done
+                    self.download_queue.task_done()
                     
+            except asyncio.CancelledError:
+                # Handle worker cancellation gracefully
+                log.info("download_worker.cancelled")
+                break
+                
             except Exception as e:
-                log.error("download_worker.failed", error=str(e))
-                if 'book' in locals():
-                    self.active_downloads.discard(book.get('name', ''))
-                    self.db.update_download_status(book['id'], 'failed', None)
-            
-            finally:
-                self.download_queue.task_done()
+                log.error("download_worker.error", error=str(e))
+                # Don't break the worker loop on errors
+                await asyncio.sleep(1)
 
     def get_download_status(self) -> List[Dict]:
         """Get status of current downloads."""
