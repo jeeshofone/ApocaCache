@@ -18,22 +18,19 @@ class DatabaseManager:
     def __init__(self, data_dir: str):
         """Initialize database connection."""
         self.db_path = os.path.join(data_dir, "library.db")
-        self._init_db()
+        self._initialize_database()
     
-    def _init_db(self):
-        """Initialize database schema if not exists."""
+    def _initialize_database(self):
+        """Initialize the database schema."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Enable foreign keys
-                cursor.execute("PRAGMA foreign_keys = ON")
-                
-                # Create books table for library_zim.xml data
+                # Create books table
                 cursor.execute("""
                 CREATE TABLE IF NOT EXISTS books (
                     id TEXT PRIMARY KEY,
-                    url TEXT NOT NULL,
+                    url TEXT,
                     size INTEGER,
                     media_count INTEGER,
                     article_count INTEGER,
@@ -48,69 +45,26 @@ class DatabaseManager:
                     tags TEXT,
                     book_date TEXT,
                     last_library_update TEXT,
-                    needs_meta4_update BOOLEAN DEFAULT 1,
+                    needs_meta4_update BOOLEAN DEFAULT TRUE,
                     download_status TEXT DEFAULT 'not_downloaded',
                     local_path TEXT
                 )
                 """)
                 
-                # Create meta4_info table for .meta4 file data
+                # Create meta4_info table
                 cursor.execute("""
                 CREATE TABLE IF NOT EXISTS meta4_info (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    book_id TEXT NOT NULL,
-                    file_name TEXT,
-                    file_size INTEGER,
+                    book_id TEXT PRIMARY KEY,
+                    mirrors TEXT,
                     md5_hash TEXT,
                     sha1_hash TEXT,
                     sha256_hash TEXT,
                     piece_length INTEGER,
                     last_meta4_update TEXT,
                     meta4_url TEXT,
-                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+                    FOREIGN KEY (book_id) REFERENCES books(id)
                 )
                 """)
-                
-                # Create mirror_urls table for meta4 mirrors
-                cursor.execute("""
-                CREATE TABLE IF NOT EXISTS mirror_urls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    meta4_id INTEGER NOT NULL,
-                    url TEXT NOT NULL,
-                    priority INTEGER DEFAULT 0,
-                    FOREIGN KEY (meta4_id) REFERENCES meta4_info(id) ON DELETE CASCADE
-                )
-                """)
-                
-                # Create pieces table for meta4 file pieces
-                cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pieces (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    meta4_id INTEGER NOT NULL,
-                    piece_hash TEXT NOT NULL,
-                    piece_index INTEGER NOT NULL,
-                    FOREIGN KEY (meta4_id) REFERENCES meta4_info(id) ON DELETE CASCADE
-                )
-                """)
-                
-                # Create processing_status table
-                cursor.execute("""
-                CREATE TABLE IF NOT EXISTS processing_status (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    process_type TEXT NOT NULL,
-                    total_items INTEGER DEFAULT 0,
-                    processed_items INTEGER DEFAULT 0,
-                    last_updated TEXT,
-                    is_complete BOOLEAN DEFAULT 0,
-                    error_count INTEGER DEFAULT 0
-                )
-                """)
-                
-                # Create indices for performance
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_books_needs_update ON books(needs_meta4_update)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_meta4_book_id ON meta4_info(book_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrors_meta4_id ON mirror_urls(meta4_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_pieces_meta4_id ON pieces(meta4_id)")
                 
                 conn.commit()
                 log.info("database.initialized", path=self.db_path)
@@ -150,8 +104,9 @@ class DatabaseManager:
                         id, url, size, media_count, article_count,
                         favicon, favicon_mime_type, title, description,
                         language, creator, publisher, name, tags,
-                        book_date, last_library_update, needs_meta4_update
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        book_date, last_library_update, needs_meta4_update,
+                        download_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_downloaded')
                     """, (
                         book_data['id'],
                         book_data.get('url', ''),
@@ -190,15 +145,14 @@ class DatabaseManager:
                 # Insert/update meta4 info
                 cursor.execute("""
                 INSERT OR REPLACE INTO meta4_info (
-                    book_id, file_name, file_size, md5_hash,
-                    sha1_hash, sha256_hash, piece_length,
-                    last_meta4_update, meta4_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    book_id, mirrors, md5_hash, sha1_hash,
+                    sha256_hash, piece_length, last_meta4_update,
+                    meta4_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, (
                     book_id,
-                    meta4_data.get('file_name', ''),
-                    meta4_data.get('file_size', 0),
+                    json.dumps(meta4_data.get('mirrors', [])),
                     meta4_data.get('md5_hash', ''),
                     meta4_data.get('sha1_hash', ''),
                     meta4_data.get('sha256_hash', ''),
@@ -208,14 +162,6 @@ class DatabaseManager:
                 ))
                 
                 meta4_id = cursor.fetchone()[0]
-                
-                # Update mirrors
-                cursor.execute("DELETE FROM mirror_urls WHERE meta4_id = ?", (meta4_id,))
-                for priority, url in enumerate(meta4_data.get('mirrors', [])):
-                    cursor.execute("""
-                    INSERT INTO mirror_urls (meta4_id, url, priority)
-                    VALUES (?, ?, ?)
-                    """, (meta4_id, url, priority))
                 
                 # Update pieces if present
                 if 'pieces' in meta4_data:
