@@ -143,6 +143,7 @@ class ContentManager:
         self.active_downloads = set()
         self.library_manager = None  # Will be set by main service
         self.web_server = None  # Will be set by main service
+        self.db = None  # Will be set by main service
         self._load_state()
         
         # Start download worker

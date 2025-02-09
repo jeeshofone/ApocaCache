@@ -144,6 +144,106 @@ async def initialize_library_xml(config: Config) -> bool:
         log.error("library.init_failed", error=str(e))
         return False
 
+async def initialize_database(config: Config, content_manager: ContentManager, db_manager: DatabaseManager) -> bool:
+    """Initialize database with data from library_zim.xml and meta4 files."""
+    try:
+        log.info("database.initialization_starting")
+        
+        # Fetch library XML
+        library_root = await content_manager._fetch_library_xml()
+        if not library_root:
+            log.error("database.init_failed", error="Could not fetch library XML")
+            return False
+            
+        # Get all books
+        books = library_root.findall(".//book")
+        total_books = len(books)
+        processed = 0
+        
+        log.info("database.populating", total_books=total_books)
+        
+        # Process books in batches
+        batch_size = 100
+        for i in range(0, total_books, batch_size):
+            batch = books[i:i + batch_size]
+            
+            # Process each book in the batch
+            for book in batch:
+                try:
+                    # Extract book data
+                    book_data = {
+                        'id': book.get('id', ''),
+                        'url': book.get('url', ''),
+                        'size': int(book.get('size', 0)),
+                        'media_count': int(book.get('mediaCount', 0)),
+                        'article_count': int(book.get('articleCount', 0)),
+                        'favicon': book.get('favicon', ''),
+                        'favicon_mime_type': book.get('faviconMimeType', ''),
+                        'title': book.find('title').text if book.find('title') is not None else '',
+                        'description': book.find('description').text if book.find('description') is not None else '',
+                        'language': book.find('language').text if book.find('language') is not None else '',
+                        'creator': book.find('creator').text if book.find('creator') is not None else '',
+                        'publisher': book.find('publisher').text if book.find('publisher') is not None else '',
+                        'name': book.find('name').text if book.find('name') is not None else '',
+                        'tags': book.find('tags').text if book.find('tags') is not None else '',
+                        'book_date': book.find('date').text if book.find('date') is not None else '',
+                        'needs_meta4_update': True
+                    }
+                    
+                    # Update book in database
+                    db_manager.update_book_from_library(book_data)
+                    processed += 1
+                    
+                    if processed % 100 == 0:
+                        log.info("database.population_progress", 
+                                processed=processed,
+                                total=total_books,
+                                percentage=f"{(processed/total_books)*100:.1f}%")
+                        
+                except Exception as e:
+                    log.error("database.book_processing_failed",
+                             book_id=book.get('id', 'unknown'),
+                             error=str(e))
+                    continue
+        
+        log.info("database.population_complete",
+                 total_processed=processed,
+                 total_books=total_books)
+        
+        # Start meta4 file processing
+        books_needing_meta4 = db_manager.get_books_needing_meta4_update()
+        if books_needing_meta4:
+            log.info("database.processing_meta4_files",
+                     count=len(books_needing_meta4))
+            
+            # Process meta4 files in batches
+            meta4_batch_size = 50
+            for i in range(0, len(books_needing_meta4), meta4_batch_size):
+                batch = books_needing_meta4[i:i + meta4_batch_size]
+                tasks = []
+                
+                for book in batch:
+                    if book['url'].endswith('.meta4'):
+                        task = asyncio.create_task(content_manager._parse_meta4_file(book['url']))
+                        tasks.append((book['id'], task))
+                
+                # Wait for batch to complete
+                for book_id, task in tasks:
+                    try:
+                        meta4_data = await task
+                        if meta4_data:
+                            db_manager.update_meta4_info(book_id, meta4_data)
+                    except Exception as e:
+                        log.error("database.meta4_processing_failed",
+                                 book_id=book_id,
+                                 error=str(e))
+        
+        return True
+        
+    except Exception as e:
+        log.error("database.initialization_failed", error=str(e))
+        return False
+
 async def main():
     """Main entry point."""
     try:
@@ -158,9 +258,16 @@ async def main():
         # Initialize managers
         content_manager = ContentManager(config)
         library_manager = LibraryManager(config)
+        db_manager = DatabaseManager(config.data_dir)
+        
+        # Initialize database with library data
+        if not await initialize_database(config, content_manager, db_manager):
+            log.error("startup.database_init_failed")
+            sys.exit(1)
         
         # Connect managers
         content_manager.set_library_manager(library_manager)
+        content_manager.db = db_manager  # Set database manager
         
         web_server = WebServer(content_manager, config)
         content_manager.set_web_server(web_server)  # Connect web server to content manager
