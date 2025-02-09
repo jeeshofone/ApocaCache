@@ -171,40 +171,22 @@ class WebServer:
         """Update all meta4 files in parallel."""
         if self.is_updating_meta4:
             return
-            
+        
         self.is_updating_meta4 = True
         self.successful_meta4_downloads = 0
         try:
-            # Get library data
-            library_root = await self.content_manager._fetch_library_xml()
-            if not library_root:
+            # Get books that need meta4 updates from database
+            books = self.db.get_books_needing_meta4_update()
+            if not books:
+                log.info("meta4_update.no_updates_needed")
                 return
-            
-            # Get all meta4 URLs and check dates
-            books = []
-            for book in library_root.findall(".//book"):
-                url = book.get('url', '')
-                if url.endswith('.meta4'):
-                    book_id = book.get('id', '')
-                    book_date = book.get('date', '')
-                    
-                    # Only process if date has changed
-                    if self.db.needs_update(book_id, book_date):
-                        books.append({
-                            'id': book_id,
-                            'url': url,
-                            'date': book_date
-                        })
-                        log.info("meta4_update.book_changed",
-                                book_id=book_id,
-                                date=book_date)
             
             total_files = len(books)
             processed_files = 0
-            self.db.update_meta4_download_status(total_files, processed_files)
+            self.db.update_processing_status('meta4_update', total_files, processed_files)
             
             # Process meta4 files in larger batches
-            batch_size = 100  # Increased batch size
+            batch_size = 100
             for i in range(0, len(books), batch_size):
                 batch = books[i:i+batch_size]
                 tasks = []
@@ -230,9 +212,9 @@ class WebServer:
                     await self.db.batch_update_meta4_info(updates)
                 
                 processed_files += len(batch)
-                self.db.update_meta4_download_status(total_files, processed_files)
+                self.db.update_processing_status('meta4_update', total_files, processed_files)
             
-            self.db.update_meta4_download_status(total_files, processed_files, True)
+            self.db.update_processing_status('meta4_update', total_files, processed_files, True)
             log.info("meta4_update.complete", 
                     total=total_files, 
                     successful=self.successful_meta4_downloads,
@@ -240,6 +222,7 @@ class WebServer:
             
         except Exception as e:
             log.error("meta4_update.failed", error=str(e))
+            self.db.update_processing_status('meta4_update', 0, 0, True, error_count=1)
         finally:
             self.is_updating_meta4 = False
     

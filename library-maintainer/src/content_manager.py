@@ -824,17 +824,20 @@ class ContentManager:
                 category=book.get('creator', 'unknown')
             )
             
-            # Get mirror URLs and MD5 from meta4 file if available
-            mirrors = []
-            md5_hash = None
-            if book['url'].endswith('.meta4'):
-                mirrors, md5_hash = await self._fetch_meta4_file(book['url'])
-                if not mirrors:
-                    log.error("download_worker.no_mirrors", book=book['name'])
-                    return
+            # Get book info from database
+            book_info = self.db.get_book_info(book['id'])
+            if not book_info or 'meta4_info' not in book_info:
+                log.error("queue_download.no_meta4_info", book=book['name'])
+                return
+            
+            # Get mirrors from database
+            mirrors = book_info['meta4_info'].get('mirrors', [])
+            if not mirrors:
+                log.error("queue_download.no_mirrors", book=book['name'])
+                return
             
             # Use first mirror as primary URL
-            url = mirrors[0] if mirrors else book['url']
+            url = mirrors[0]
             
             # Create category subdirectory
             category_dir = os.path.join(self.config.data_dir, content_item.category)
@@ -850,29 +853,16 @@ class ContentManager:
             # Add to active downloads
             self.active_downloads.add(book['name'])
             
-            try:
-                # Download the file
-                success = await self._download_file(
-                    url,
-                    dest_path,
-                    content_item,
-                    mirrors[1:] if len(mirrors) > 1 else None,  # Rest of mirrors as fallbacks
-                    md5_hash  # Pass the MD5 hash
-                )
-                
-                if success:
-                    log.info("download_worker.success", book=book['name'])
-                    await self._handle_successful_download(book, dest_path)
-                else:
-                    log.error("download_worker.failed", book=book['name'])
-                    
-            finally:
-                # Remove from active downloads
-                self.active_downloads.discard(book['name'])
-                
+            # Update database status
+            self.db.update_download_status(book['id'], 'downloading', dest_path)
+            
+            # Queue the download
+            self.download_queue.put_nowait((book, content_item))
+            log.info("queue_download.queued", book=book['name'])
+            
         except Exception as e:
-            log.error("queue_download.failed", error=str(e))
-            raise
+            log.error("queue_download.failed", book=book.get('name', ''), error=str(e))
+            self.active_downloads.discard(book.get('name', ''))
 
     async def _download_worker(self):
         """Background worker to process download queue."""
@@ -880,11 +870,15 @@ class ContentManager:
             try:
                 book, content_item = await self.download_queue.get()
                 
-                # Get mirror URLs from meta4 file
-                mirrors = []
-                if book['url'].endswith('.meta4'):
-                    mirrors = await self._fetch_meta4_file(book['url'])
+                # Get book info from database
+                book_info = self.db.get_book_info(book['id'])
+                if not book_info or 'meta4_info' not in book_info:
+                    log.error("download_worker.no_meta4_info", book=book['name'])
+                    continue
                 
+                # Get mirrors and file info from database
+                meta4_info = book_info['meta4_info']
+                mirrors = meta4_info.get('mirrors', [])
                 if not mirrors:
                     log.error("download_worker.no_mirrors", book=book['name'])
                     continue
@@ -903,21 +897,25 @@ class ContentManager:
                 
                 dest_path = os.path.join(category_dir, filename)
                 
-                # Add to active downloads
-                self.active_downloads.add(book['name'])
-                
                 try:
                     # Download the file
                     success = await self._download_file(
                         url,
                         dest_path,
                         content_item,
-                        mirrors[1:]  # Rest of mirrors as fallbacks
+                        mirrors[1:],  # Rest of mirrors as fallbacks
+                        expected_md5=meta4_info.get('md5_hash'),
+                        expected_sha1=meta4_info.get('sha1_hash'),
+                        expected_sha256=meta4_info.get('sha256_hash')
                     )
                     
                     if success:
+                        # Update database status
+                        self.db.update_download_status(book['id'], 'downloaded', dest_path)
                         log.info("download_worker.success", book=book['name'])
                     else:
+                        # Update database status
+                        self.db.update_download_status(book['id'], 'failed', None)
                         log.error("download_worker.failed", book=book['name'])
                         
                 finally:
@@ -925,7 +923,11 @@ class ContentManager:
                     self.active_downloads.discard(book['name'])
                     
             except Exception as e:
-                log.error("download_worker.error", error=str(e))
+                log.error("download_worker.failed", error=str(e))
+                if 'book' in locals():
+                    self.active_downloads.discard(book.get('name', ''))
+                    self.db.update_download_status(book['id'], 'failed', None)
+            
             finally:
                 self.download_queue.task_done()
 
