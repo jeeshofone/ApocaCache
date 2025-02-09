@@ -1,6 +1,6 @@
 """
 Database management for ApocaCache library maintainer.
-Handles caching of meta4 file information in SQLite.
+Handles storage of library and meta4 file information in SQLite.
 """
 
 import os
@@ -13,11 +13,11 @@ from typing import Dict, Optional, List, Set
 log = structlog.get_logger()
 
 class DatabaseManager:
-    """Manages SQLite database for meta4 file caching."""
+    """Manages SQLite database for library and meta4 file information."""
     
     def __init__(self, data_dir: str):
         """Initialize database connection."""
-        self.db_path = os.path.join(data_dir, "meta4_cache.db")
+        self.db_path = os.path.join(data_dir, "library.db")
         self._init_db()
     
     def _init_db(self):
@@ -26,38 +26,15 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Create meta4 files table
-                # Check if we need to migrate the schema
+                # Enable foreign keys
+                cursor.execute("PRAGMA foreign_keys = ON")
+                
+                # Create books table for library_zim.xml data
                 cursor.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='meta4_files'
-                """)
-                
-                table_exists = cursor.fetchone() is not None
-                
-                if table_exists:
-                    # Check if we need to add the book_date column
-                    cursor.execute("PRAGMA table_info(meta4_files)")
-                    columns = {row[1] for row in cursor.fetchall()}
-                    
-                    if 'book_date' not in columns:
-                        log.info("database.adding_book_date_column")
-                        cursor.execute("ALTER TABLE meta4_files ADD COLUMN book_date TEXT")
-                else:
-                    # Create new table with all columns
-                    cursor.execute("""
-                    CREATE TABLE meta4_files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    book_id TEXT UNIQUE,
-                    file_name TEXT,
-                    file_size INTEGER,
-                    md5_hash TEXT,
-                    sha1_hash TEXT,
-                    sha256_hash TEXT,
-                    mirrors TEXT,
-                    last_updated TIMESTAMP,
-                    meta4_url TEXT,
-                    book_date TEXT,
+                CREATE TABLE IF NOT EXISTS books (
+                    id TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    size INTEGER,
                     media_count INTEGER,
                     article_count INTEGER,
                     favicon TEXT,
@@ -68,20 +45,72 @@ class DatabaseManager:
                     creator TEXT,
                     publisher TEXT,
                     name TEXT,
-                    tags TEXT
+                    tags TEXT,
+                    book_date TEXT,
+                    last_library_update TEXT,
+                    needs_meta4_update BOOLEAN DEFAULT 1,
+                    download_status TEXT DEFAULT 'not_downloaded',
+                    local_path TEXT
                 )
                 """)
                 
-                # Create meta4 download status table
+                # Create meta4_info table for .meta4 file data
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS meta4_status (
+                CREATE TABLE IF NOT EXISTS meta4_info (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    total_files INTEGER DEFAULT 0,
-                    processed_files INTEGER DEFAULT 0,
-                    last_updated TIMESTAMP,
-                    is_complete BOOLEAN DEFAULT 0
+                    book_id TEXT NOT NULL,
+                    file_name TEXT,
+                    file_size INTEGER,
+                    md5_hash TEXT,
+                    sha1_hash TEXT,
+                    sha256_hash TEXT,
+                    piece_length INTEGER,
+                    last_meta4_update TEXT,
+                    meta4_url TEXT,
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
                 )
                 """)
+                
+                # Create mirror_urls table for meta4 mirrors
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mirror_urls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meta4_id INTEGER NOT NULL,
+                    url TEXT NOT NULL,
+                    priority INTEGER DEFAULT 0,
+                    FOREIGN KEY (meta4_id) REFERENCES meta4_info(id) ON DELETE CASCADE
+                )
+                """)
+                
+                # Create pieces table for meta4 file pieces
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pieces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meta4_id INTEGER NOT NULL,
+                    piece_hash TEXT NOT NULL,
+                    piece_index INTEGER NOT NULL,
+                    FOREIGN KEY (meta4_id) REFERENCES meta4_info(id) ON DELETE CASCADE
+                )
+                """)
+                
+                # Create processing_status table
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS processing_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    process_type TEXT NOT NULL,
+                    total_items INTEGER DEFAULT 0,
+                    processed_items INTEGER DEFAULT 0,
+                    last_updated TEXT,
+                    is_complete BOOLEAN DEFAULT 0,
+                    error_count INTEGER DEFAULT 0
+                )
+                """)
+                
+                # Create indices for performance
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_books_needs_update ON books(needs_meta4_update)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_meta4_book_id ON meta4_info(book_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrors_meta4_id ON mirror_urls(meta4_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_pieces_meta4_id ON pieces(meta4_id)")
                 
                 conn.commit()
                 log.info("database.initialized", path=self.db_path)
@@ -90,391 +119,268 @@ class DatabaseManager:
             log.error("database.init_failed", error=str(e))
             raise
     
-    async def batch_update_meta4_info(self, updates: List[Dict]):
-        """Update multiple meta4 file records in a single transaction."""
+    def update_book_from_library(self, book_data: Dict) -> bool:
+        """Update or insert book data from library_zim.xml."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                for meta4_data in updates:
-                    mirrors = "|".join(meta4_data.get("mirrors", []))
+                # Check if book exists and compare data
+                cursor.execute("""
+                SELECT size, media_count, article_count, book_date
+                FROM books WHERE id = ?
+                """, (book_data['id'],))
+                
+                existing = cursor.fetchone()
+                needs_update = True
+                
+                if existing:
+                    # Compare relevant fields to determine if update needed
+                    old_size, old_media_count, old_article_count, old_date = existing
+                    needs_update = (
+                        old_size != book_data.get('size', 0) or
+                        old_media_count != book_data.get('media_count', 0) or
+                        old_article_count != book_data.get('article_count', 0) or
+                        old_date != book_data.get('book_date', '')
+                    )
+                
+                if needs_update:
                     cursor.execute("""
-                    INSERT OR REPLACE INTO meta4_files 
-                    (book_id, file_name, file_size, md5_hash, sha1_hash, sha256_hash, 
-                    mirrors, last_updated, meta4_url, book_date, media_count, article_count,
-                    favicon, favicon_mime_type, title, description, language, creator,
-                    publisher, name, tags)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO books (
+                        id, url, size, media_count, article_count,
+                        favicon, favicon_mime_type, title, description,
+                        language, creator, publisher, name, tags,
+                        book_date, last_library_update, needs_meta4_update
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """, (
-                        meta4_data["book_id"],
-                        meta4_data.get("file_name"),
-                        meta4_data.get("file_size", 0),
-                        meta4_data.get("md5_hash"),
-                        meta4_data.get("sha1_hash"),
-                        meta4_data.get("sha256_hash"),
-                        mirrors,
+                        book_data['id'],
+                        book_data.get('url', ''),
+                        book_data.get('size', 0),
+                        book_data.get('media_count', 0),
+                        book_data.get('article_count', 0),
+                        book_data.get('favicon', ''),
+                        book_data.get('favicon_mime_type', ''),
+                        book_data.get('title', ''),
+                        book_data.get('description', ''),
+                        book_data.get('language', ''),
+                        book_data.get('creator', ''),
+                        book_data.get('publisher', ''),
+                        book_data.get('name', ''),
+                        json.dumps(book_data.get('tags', [])),
+                        book_data.get('book_date', ''),
                         datetime.now().isoformat(),
-                        meta4_data.get("meta4_url"),
-                        meta4_data.get("book_date"),
-                        meta4_data.get("media_count", 0),
-                        meta4_data.get("article_count", 0),
-                        meta4_data.get("favicon", ""),
-                        meta4_data.get("favicon_mime_type", ""),
-                        meta4_data.get("title", ""),
-                        meta4_data.get("description", ""),
-                        meta4_data.get("language", ""),
-                        meta4_data.get("creator", ""),
-                        meta4_data.get("publisher", ""),
-                        meta4_data.get("name", ""),
-                        meta4_data.get("tags", "")
+                        True
                     ))
                 
                 conn.commit()
-                log.info("database.batch_update_complete", count=len(updates))
+                return needs_update
                 
         except Exception as e:
-            log.error("database.batch_update_failed", error=str(e))
+            log.error("database.update_book_failed",
+                     book_id=book_data.get('id', ''),
+                     error=str(e))
+            return False
     
-    async def update_meta4_info(self, book_id: str, meta4_data: Dict):
-        """Update or insert meta4 file information."""
+    def update_meta4_info(self, book_id: str, meta4_data: Dict):
+        """Update meta4 information for a book."""
         try:
-            mirrors = "|".join(meta4_data.get("mirrors", []))
-            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # Insert/update meta4 info
                 cursor.execute("""
-                INSERT OR REPLACE INTO meta4_files 
-                (book_id, file_name, file_size, md5_hash, sha1_hash, sha256_hash,
-                mirrors, last_updated, meta4_url, book_date, media_count, article_count,
-                favicon, favicon_mime_type, title, description, language, creator,
-                publisher, name, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO meta4_info (
+                    book_id, file_name, file_size, md5_hash,
+                    sha1_hash, sha256_hash, piece_length,
+                    last_meta4_update, meta4_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """, (
                     book_id,
-                    meta4_data.get("file_name"),
-                    meta4_data.get("file_size", 0),
-                    meta4_data.get("md5_hash"),
-                    meta4_data.get("sha1_hash"),
-                    meta4_data.get("sha256_hash"),
-                    mirrors,
+                    meta4_data.get('file_name', ''),
+                    meta4_data.get('file_size', 0),
+                    meta4_data.get('md5_hash', ''),
+                    meta4_data.get('sha1_hash', ''),
+                    meta4_data.get('sha256_hash', ''),
+                    meta4_data.get('piece_length', 0),
                     datetime.now().isoformat(),
-                    meta4_data.get("meta4_url"),
-                    meta4_data.get("book_date"),
-                    meta4_data.get("media_count", 0),
-                    meta4_data.get("article_count", 0),
-                    meta4_data.get("favicon", ""),
-                    meta4_data.get("favicon_mime_type", ""),
-                    meta4_data.get("title", ""),
-                    meta4_data.get("description", ""),
-                    meta4_data.get("language", ""),
-                    meta4_data.get("creator", ""),
-                    meta4_data.get("publisher", ""),
-                    meta4_data.get("name", ""),
-                    meta4_data.get("tags", "")
+                    meta4_data.get('meta4_url', '')
                 ))
                 
-                conn.commit()
-                log.info("database.meta4_updated", 
-                        book_id=book_id, 
-                        file_name=meta4_data.get("file_name"))
+                meta4_id = cursor.fetchone()[0]
                 
-        except Exception as e:
-            log.error("database.update_failed", 
-                     book_id=book_id, 
-                     error=str(e))
-    
-    def get_meta4_info(self, book_id: str) -> Optional[Dict]:
-        """Get cached meta4 file information."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+                # Update mirrors
+                cursor.execute("DELETE FROM mirror_urls WHERE meta4_id = ?", (meta4_id,))
+                for priority, url in enumerate(meta4_data.get('mirrors', [])):
+                    cursor.execute("""
+                    INSERT INTO mirror_urls (meta4_id, url, priority)
+                    VALUES (?, ?, ?)
+                    """, (meta4_id, url, priority))
                 
+                # Update pieces if present
+                if 'pieces' in meta4_data:
+                    cursor.execute("DELETE FROM pieces WHERE meta4_id = ?", (meta4_id,))
+                    for idx, piece_hash in enumerate(meta4_data['pieces']):
+                        cursor.execute("""
+                        INSERT INTO pieces (meta4_id, piece_hash, piece_index)
+                        VALUES (?, ?, ?)
+                        """, (meta4_id, piece_hash, idx))
+                
+                # Mark book as not needing meta4 update
                 cursor.execute("""
-                SELECT file_name, file_size, md5_hash, sha1_hash, sha256_hash, 
-                       mirrors, last_updated, meta4_url
-                FROM meta4_files
-                WHERE book_id = ?
+                UPDATE books 
+                SET needs_meta4_update = 0 
+                WHERE id = ?
                 """, (book_id,))
                 
-                row = cursor.fetchone()
-                if row:
-                    return {
-                        "file_name": row[0],
-                        "file_size": row[1],
-                        "md5_hash": row[2],
-                        "sha1_hash": row[3],
-                        "sha256_hash": row[4],
-                        "mirrors": row[5].split("|") if row[5] else [],
-                        "last_updated": row[6],
-                        "meta4_url": row[7]
-                    }
-                return None
+                conn.commit()
+                log.info("database.meta4_updated",
+                        book_id=book_id,
+                        meta4_id=meta4_id)
                 
         except Exception as e:
-            log.error("database.get_failed", 
-                     book_id=book_id, 
+            log.error("database.update_meta4_failed",
+                     book_id=book_id,
                      error=str(e))
-            return None
     
-    def get_all_meta4_info(self) -> List[Dict]:
-        """Get all cached meta4 file information."""
+    def get_books_needing_meta4_update(self) -> List[Dict]:
+        """Get list of books that need meta4 updates."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
                 cursor.execute("""
-                SELECT book_id, file_name, file_size, md5_hash, sha1_hash, 
-                       sha256_hash, mirrors, last_updated, meta4_url
-                FROM meta4_files
+                SELECT id, url, book_date
+                FROM books
+                WHERE needs_meta4_update = 1
                 """)
                 
                 return [{
-                    "book_id": row[0],
-                    "file_name": row[1],
-                    "file_size": row[2],
-                    "md5_hash": row[3],
-                    "sha1_hash": row[4],
-                    "sha256_hash": row[5],
-                    "mirrors": row[6].split("|") if row[6] else [],
-                    "last_updated": row[7],
-                    "meta4_url": row[8]
+                    'id': row[0],
+                    'url': row[1],
+                    'date': row[2]
                 } for row in cursor.fetchall()]
                 
         except Exception as e:
-            log.error("database.get_all_failed", error=str(e))
+            log.error("database.get_needs_update_failed", error=str(e))
             return []
     
-    def get_meta4_download_status(self) -> Dict:
-        """Get the current meta4 download status."""
+    def get_book_info(self, book_id: str) -> Optional[Dict]:
+        """Get complete book information including meta4 data."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # Get book data
+                cursor.execute("SELECT * FROM books WHERE id = ?", (book_id,))
+                book_row = cursor.fetchone()
+                if not book_row:
+                    return None
+                
+                # Convert to dict
+                columns = [desc[0] for desc in cursor.description]
+                book_data = dict(zip(columns, book_row))
+                
+                # Get meta4 info
+                cursor.execute("SELECT * FROM meta4_info WHERE book_id = ?", (book_id,))
+                meta4_row = cursor.fetchone()
+                if meta4_row:
+                    meta4_columns = [desc[0] for desc in cursor.description]
+                    meta4_data = dict(zip(meta4_columns, meta4_row))
+                    
+                    # Get mirrors
+                    cursor.execute("""
+                    SELECT url FROM mirror_urls 
+                    WHERE meta4_id = ? 
+                    ORDER BY priority
+                    """, (meta4_data['id'],))
+                    meta4_data['mirrors'] = [row[0] for row in cursor.fetchall()]
+                    
+                    # Get pieces
+                    cursor.execute("""
+                    SELECT piece_hash FROM pieces 
+                    WHERE meta4_id = ? 
+                    ORDER BY piece_index
+                    """, (meta4_data['id'],))
+                    meta4_data['pieces'] = [row[0] for row in cursor.fetchall()]
+                    
+                    book_data['meta4_info'] = meta4_data
+                
+                # Parse JSON fields
+                if book_data.get('tags'):
+                    book_data['tags'] = json.loads(book_data['tags'])
+                
+                return book_data
+                
+        except Exception as e:
+            log.error("database.get_book_failed",
+                     book_id=book_id,
+                     error=str(e))
+            return None
+    
+    def update_processing_status(self, process_type: str, total: int, processed: int,
+                               is_complete: bool = False, error_count: int = 0):
+        """Update processing status for library or meta4 updates."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
                 cursor.execute("""
-                SELECT total_files, processed_files, last_updated, is_complete
-                FROM meta4_status
+                INSERT INTO processing_status 
+                (process_type, total_items, processed_items, 
+                 last_updated, is_complete, error_count)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    process_type,
+                    total,
+                    processed,
+                    datetime.now().isoformat(),
+                    is_complete,
+                    error_count
+                ))
+                conn.commit()
+                
+        except Exception as e:
+            log.error("database.status_update_failed",
+                     process_type=process_type,
+                     error=str(e))
+    
+    def get_processing_status(self, process_type: str) -> Dict:
+        """Get latest processing status for a given type."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                SELECT total_items, processed_items, last_updated,
+                       is_complete, error_count
+                FROM processing_status
+                WHERE process_type = ?
                 ORDER BY id DESC LIMIT 1
-                """)
+                """, (process_type,))
                 
                 row = cursor.fetchone()
                 if row:
                     return {
-                        "total_files": row[0],
-                        "processed_files": row[1],
+                        "total_items": row[0],
+                        "processed_items": row[1],
                         "last_updated": row[2],
-                        "is_complete": bool(row[3])
+                        "is_complete": bool(row[3]),
+                        "error_count": row[4]
                     }
                 return {
-                    "total_files": 0,
-                    "processed_files": 0,
+                    "total_items": 0,
+                    "processed_items": 0,
                     "last_updated": None,
-                    "is_complete": False
+                    "is_complete": False,
+                    "error_count": 0
                 }
                 
         except Exception as e:
-            log.error("database.status_get_failed", error=str(e))
+            log.error("database.status_get_failed",
+                     process_type=process_type,
+                     error=str(e))
             return {
-                "total_files": 0,
-                "processed_files": 0,
+                "total_items": 0,
+                "processed_items": 0,
                 "last_updated": None,
-                "is_complete": False
+                "is_complete": False,
+                "error_count": 0
             }
-    
-    def update_meta4_download_status(self, total: int, processed: int, is_complete: bool = False):
-        """Update the meta4 download status."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute("""
-                INSERT INTO meta4_status 
-                (total_files, processed_files, last_updated, is_complete)
-                VALUES (?, ?, ?, ?)
-                """, (
-                    total,
-                    processed,
-                    datetime.now().isoformat(),
-                    is_complete
-                ))
-                
-                conn.commit()
-                log.info("database.status_updated",
-                        total=total,
-                        processed=processed,
-                        is_complete=is_complete)
-                
-        except Exception as e:
-            log.error("database.status_update_failed", error=str(e))
-    
-    def cleanup_old_entries(self, days: int = 30):
-        """Remove entries older than specified days."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute("""
-                DELETE FROM meta4_files
-                WHERE last_updated < datetime('now', '-? days')
-                """, (days,))
-                
-                cursor.execute("""
-                DELETE FROM meta4_status
-                WHERE last_updated < datetime('now', '-? days')
-                """, (days,))
-                
-                conn.commit()
-                log.info("database.cleanup_completed", 
-                        deleted_rows=cursor.rowcount)
-                
-        except Exception as e:
-            log.error("database.cleanup_failed", error=str(e)) 
-
-    def needs_update(self, book_id: str, new_date: str) -> bool:
-        """Check if book needs updating based on date."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute("""
-                SELECT book_date FROM meta4_files
-                WHERE book_id = ?
-                """, (book_id,))
-                
-                row = cursor.fetchone()
-                if not row:
-                    # No previous record, needs update
-                    return True
-                    
-                old_date = row[0]
-                if not old_date or old_date != new_date:
-                    return True
-                    
-                return False
-                
-        except Exception as e:
-            log.error("database.date_check_failed", 
-                     book_id=book_id, 
-                     error=str(e))
-            # On error, assume update needed
-            return True
-
-    def get_meta4_info(self, book_id: str) -> Optional[Dict]:
-        """Get meta4 info for a book from the database."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    'SELECT * FROM meta4_files WHERE book_id = ?',
-                    (book_id,)
-                )
-                row = cursor.fetchone()
-                
-                if row:
-                    # Convert row to dictionary using column names
-                    columns = [desc[0] for desc in cursor.description]
-                    data = dict(zip(columns, row))
-                    
-                    # Parse JSON fields
-                    if data.get('mirrors'):
-                        data['mirrors'] = json.loads(data['mirrors'])
-                    if data.get('tags'):
-                        data['tags'] = json.loads(data['tags'])
-                    
-                    return data
-                return None
-                
-        except Exception as e:
-            log.error("database.get_meta4_info_failed", 
-                     book_id=book_id, 
-                     error=str(e))
-            return None
-    
-    def batch_update_meta4_info(self, updates: List[Dict]):
-        """Batch update meta4 info for multiple books."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                for update in updates:
-                    # Convert lists/dicts to JSON strings
-                    if 'mirrors' in update:
-                        update['mirrors'] = json.dumps(update['mirrors'])
-                    if 'tags' in update:
-                        update['tags'] = json.dumps(update['tags'])
-                    
-                    # Set last_updated timestamp
-                    update['last_updated'] = datetime.now().isoformat()
-                    
-                    # Prepare column names and placeholders
-                    columns = ', '.join(update.keys())
-                    placeholders = ', '.join(['?' for _ in update])
-                    
-                    # Prepare UPDATE clause
-                    update_clause = ', '.join([f"{k} = ?" for k in update.keys()])
-                    
-                    # Use UPSERT (INSERT OR REPLACE)
-                    cursor.execute(f'''
-                        INSERT OR REPLACE INTO meta4_files ({columns})
-                        VALUES ({placeholders})
-                    ''', list(update.values()))
-                
-                conn.commit()
-                log.info("database.batch_update_complete", 
-                        updates=len(updates))
-                
-        except Exception as e:
-            log.error("database.batch_update_failed", error=str(e))
-            raise
-    
-    def update_download_status(self, book_id: str, status: str, local_path: Optional[str] = None):
-        """Update the download status and local path for a book."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                if local_path:
-                    cursor.execute('''
-                        UPDATE meta4_files 
-                        SET download_status = ?, local_path = ?, last_updated = ?
-                        WHERE book_id = ?
-                    ''', (status, local_path, datetime.now().isoformat(), book_id))
-                else:
-                    cursor.execute('''
-                        UPDATE meta4_files 
-                        SET download_status = ?, last_updated = ?
-                        WHERE book_id = ?
-                    ''', (status, datetime.now().isoformat(), book_id))
-                conn.commit()
-                
-        except Exception as e:
-            log.error("database.update_status_failed", 
-                     book_id=book_id, 
-                     error=str(e))
-            raise
-    
-    def get_all_books(self) -> List[Dict]:
-        """Get all books from the database."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM meta4_files')
-                
-                books = []
-                columns = [desc[0] for desc in cursor.description]
-                
-                for row in cursor.fetchall():
-                    book = dict(zip(columns, row))
-                    
-                    # Parse JSON fields
-                    if book.get('mirrors'):
-                        book['mirrors'] = json.loads(book['mirrors'])
-                    if book.get('tags'):
-                        book['tags'] = json.loads(book['tags'])
-                    
-                    books.append(book)
-                
-                return books
-                
-        except Exception as e:
-            log.error("database.get_all_books_failed", error=str(e))
-            return []

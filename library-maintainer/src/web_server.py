@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Set
 from datetime import datetime
 import asyncio
+import sqlite3
 
 from database import DatabaseManager
 
@@ -252,59 +253,53 @@ class WebServer:
                 return self.library_cache
         
         try:
-            # Fetch fresh data from library XML for basic structure
-            library_root = await self.content_manager._fetch_library_xml()
-            if not library_root:
-                return None
-            
-            # Parse books into a list of dictionaries
+            # Get all books from database
             books = []
-            for book in library_root.findall(".//book"):
-                try:
-                    book_id = book.get('id', '')
-                    
-                    # Get metadata from database
-                    meta4_info = self.db.get_meta4_info(book_id)
-                    if not meta4_info:
-                        continue  # Skip books without metadata in database
-                    
-                    # Construct book data primarily from database
-                    book_data = {
-                        'id': book_id,
-                        'url': book.get('url', ''),
-                        'title': meta4_info.get('title', ''),
-                        'description': meta4_info.get('description', ''),
-                        'language': meta4_info.get('language', ''),
-                        'creator': meta4_info.get('creator', ''),
-                        'publisher': meta4_info.get('publisher', ''),
-                        'name': meta4_info.get('name', ''),
-                        'date': meta4_info.get('book_date', ''),
-                        'tags': meta4_info.get('tags', ''),
-                        'favicon': meta4_info.get('favicon', ''),
-                        'mediaCount': meta4_info.get('media_count', 0),
-                        'articleCount': meta4_info.get('article_count', 0),
-                        'size': meta4_info.get('file_size', 0),
-                        'mirrors': meta4_info.get('mirrors', []),
-                        'last_updated': meta4_info.get('last_updated', '')
-                    }
-                    
-                    # Check if file is downloaded by looking for the ZIM file
-                    filename = os.path.basename(book_data['url'].replace('.meta4', '.zim'))
-                    for root, _, files in os.walk(self.config.data_dir):
-                        if filename in files:
-                            book_data['downloaded'] = True
-                            book_data['local_path'] = os.path.join(root, filename)
-                            break
-                    else:
-                        book_data['downloaded'] = False
-                    
-                    books.append(book_data)
-                    
-                except Exception as e:
-                    log.error("library_parse.book_failed", 
-                            book_id=book_id, 
-                            error=str(e))
-                    continue
+            with sqlite3.connect(self.db.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get books with their meta4 info
+                cursor.execute("""
+                SELECT b.*, m.file_size, m.md5_hash, m.sha1_hash, m.sha256_hash,
+                       m.piece_length, m.last_meta4_update, m.meta4_url, m.id as meta4_id
+                FROM books b
+                LEFT JOIN meta4_info m ON b.id = m.book_id
+                """)
+                
+                columns = [desc[0] for desc in cursor.description]
+                
+                for row in cursor.fetchall():
+                    try:
+                        book_data = dict(zip(columns, row))
+                        meta4_id = book_data.pop('meta4_id', None)
+                        
+                        # Get mirror URLs if meta4 info exists
+                        if meta4_id:
+                            cursor.execute("""
+                            SELECT url FROM mirror_urls
+                            WHERE meta4_id = ?
+                            ORDER BY priority
+                            """, (meta4_id,))
+                            book_data['mirrors'] = [row[0] for row in cursor.fetchall()]
+                        else:
+                            book_data['mirrors'] = []
+                        
+                        # Parse JSON fields
+                        if book_data.get('tags'):
+                            book_data['tags'] = json.loads(book_data['tags'])
+                        
+                        # Map database fields to web interface fields
+                        book_data['mediaCount'] = book_data.pop('media_count', 0)
+                        book_data['articleCount'] = book_data.pop('article_count', 0)
+                        book_data['downloaded'] = book_data.get('download_status') == 'downloaded'
+                        
+                        books.append(book_data)
+                        
+                    except Exception as e:
+                        log.error("library_parse.book_failed", 
+                                book_id=row[0] if row else 'unknown',
+                                error=str(e))
+                        continue
             
             # Update cache
             self.library_cache = books
@@ -341,7 +336,7 @@ class WebServer:
     async def handle_meta4_status(self, request):
         """Handle meta4 download status request."""
         try:
-            status = self.db.get_meta4_download_status()
+            status = self.db.get_processing_status('meta4_update')
             return web.json_response(status)
         except Exception as e:
             log.error("meta4_status.failed", error=str(e))
