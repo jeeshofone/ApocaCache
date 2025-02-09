@@ -192,10 +192,16 @@
                             </h6>
                             <p class="card-text">${book.description || 'No description available'}</p>
                             <div class="d-flex justify-content-between align-items-center">
-                                <span class="book-size">${book.size ? formatSize(book.size) : 'Size unknown'}</span>
-                                <button class="btn btn-sm ${selectedBooks.has(book.id) ? 'btn-danger' : 'btn-primary'}"
-                                        onclick="toggleBook('${book.id}', event)">
-                                    ${selectedBooks.has(book.id) ? 'Remove' : 'Select'}
+                                <div>
+                                    <span class="book-size">${book.size ? formatSize(book.size) : 'Size unknown'}</span>
+                                    ${book.downloaded ? 
+                                        '<span class="badge bg-success ms-2">Downloaded</span>' : 
+                                        '<span class="badge bg-secondary ms-2">Not Downloaded</span>'}
+                                </div>
+                                <button class="btn btn-sm ${selectedBooks.has(book.id) ? 'btn-danger' : book.downloaded ? 'btn-secondary disabled' : 'btn-primary'}"
+                                        onclick="toggleBook('${book.id}', event)"
+                                        ${book.downloaded ? 'disabled' : ''}>
+                                    ${selectedBooks.has(book.id) ? 'Remove' : book.downloaded ? 'Downloaded' : 'Select'}
                                 </button>
                             </div>
                         </div>

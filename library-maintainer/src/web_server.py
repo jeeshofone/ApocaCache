@@ -229,6 +229,16 @@ class WebServer:
                     if meta4_info:
                         book_data['size'] = meta4_info['file_size']
                     
+                    # Check if file is downloaded
+                    filename = os.path.basename(book_data['url'].replace('.meta4', '.zim'))
+                    for root, _, files in os.walk(self.config.data_dir):
+                        if filename in files:
+                            book_data['downloaded'] = True
+                            book_data['local_path'] = os.path.join(root, filename)
+                            break
+                    else:
+                        book_data['downloaded'] = False
+                    
                     books.append(book_data)
                     
                 except Exception as e:
