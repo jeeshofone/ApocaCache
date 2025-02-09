@@ -106,7 +106,9 @@ class LibraryManager:
                     
                     # Create book element with all attributes
                     book = ET.SubElement(root, 'book')
-                    book.set('id', metadata['id'])
+                    # Generate ID from filename if not present
+                    book_id = metadata.get('id', os.path.splitext(os.path.basename(filepath))[0])
+                    book.set('id', book_id)
                     book.set('path', rel_path)
                     book.set('size', str(size))
                     book.set('mediaCount', str(metadata.get('media_count', 0)))
