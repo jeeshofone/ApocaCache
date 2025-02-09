@@ -26,8 +26,12 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 
                 # Create meta4 files table
+                # Drop existing table if it exists
+                cursor.execute("DROP TABLE IF EXISTS meta4_files")
+                
+                # Create fresh table with all columns
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS meta4_files (
+                CREATE TABLE meta4_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     book_id TEXT UNIQUE,
                     file_name TEXT,
