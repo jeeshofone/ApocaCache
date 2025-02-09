@@ -271,3 +271,32 @@ class DatabaseManager:
                 
         except Exception as e:
             log.error("database.cleanup_failed", error=str(e)) 
+
+    def needs_update(self, book_id: str, new_date: str) -> bool:
+        """Check if book needs updating based on date."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                SELECT book_date FROM meta4_files
+                WHERE book_id = ?
+                """, (book_id,))
+                
+                row = cursor.fetchone()
+                if not row:
+                    # No previous record, needs update
+                    return True
+                    
+                old_date = row[0]
+                if not old_date or old_date != new_date:
+                    return True
+                    
+                return False
+                
+        except Exception as e:
+            log.error("database.date_check_failed", 
+                     book_id=book_id, 
+                     error=str(e))
+            # On error, assume update needed
+            return True
