@@ -94,8 +94,27 @@ class WebServer:
                             if url_elem.text:
                                 mirrors.append(url_elem.text)
                         
+                        # Get additional metadata from parent XML
+                        parent_book = root.find(".//book")
+                        if parent_book is not None:
+                            media_count = parent_book.get("mediaCount", "0")
+                            article_count = parent_book.get("articleCount", "0")
+                            favicon = parent_book.get("favicon", "")
+                            favicon_mime_type = parent_book.get("faviconMimeType", "")
+                            title = parent_book.get("title", "")
+                            description = parent_book.get("description", "")
+                            language = parent_book.get("language", "")
+                            creator = parent_book.get("creator", "")
+                            publisher = parent_book.get("publisher", "")
+                            name = parent_book.get("name", "")
+                            tags = parent_book.get("tags", "")
+                        else:
+                            media_count = article_count = "0"
+                            favicon = favicon_mime_type = title = description = ""
+                            language = creator = publisher = name = tags = ""
+                        
                         self.successful_meta4_downloads += 1
-                        if self.successful_meta4_downloads % 25 == 0:  # Log every 25 successful downloads
+                        if self.successful_meta4_downloads % 25 == 0:
                             log.info("meta4_download.status", 
                                    successful_downloads=self.successful_meta4_downloads)
                         
@@ -106,7 +125,18 @@ class WebServer:
                             "sha1_hash": hashes.get("sha-1", ""),
                             "sha256_hash": hashes.get("sha-256", ""),
                             "mirrors": mirrors,
-                            "meta4_url": url
+                            "meta4_url": url,
+                            "media_count": int(media_count),
+                            "article_count": int(article_count),
+                            "favicon": favicon,
+                            "favicon_mime_type": favicon_mime_type,
+                            "title": title,
+                            "description": description,
+                            "language": language,
+                            "creator": creator,
+                            "publisher": publisher,
+                            "name": name,
+                            "tags": tags
                         }
                         
         except Exception as e:
