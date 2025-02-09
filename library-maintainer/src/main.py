@@ -173,7 +173,7 @@ async def initialize_database(config: Config, content_manager: ContentManager, d
                     # Extract book data
                     book_data = {
                         'id': book.get('id', ''),
-                        'url': book.get('url', ''),
+                        'url': book.find('url').text if book.find('url') is not None else '',
                         'size': int(book.get('size', 0)),
                         'media_count': int(book.get('mediaCount', 0)),
                         'article_count': int(book.get('articleCount', 0)),
@@ -189,6 +189,11 @@ async def initialize_database(config: Config, content_manager: ContentManager, d
                         'book_date': book.find('date').text if book.find('date') is not None else '',
                         'needs_meta4_update': True
                     }
+                    
+                    # Clean up text fields
+                    for key in ['title', 'description', 'language', 'creator', 'publisher', 'name', 'tags', 'book_date']:
+                        if book_data[key]:
+                            book_data[key] = book_data[key].strip()
                     
                     # Update book in database
                     db_manager.update_book_from_library(book_data)

@@ -60,9 +60,23 @@ class DatabaseManager:
                     sha1_hash TEXT,
                     sha256_hash TEXT,
                     piece_length INTEGER,
+                    file_size INTEGER,
                     last_meta4_update TEXT,
                     meta4_url TEXT,
                     FOREIGN KEY (book_id) REFERENCES books(id)
+                )
+                """)
+                
+                # Create processing_status table
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS processing_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    process_type TEXT NOT NULL,
+                    total_items INTEGER DEFAULT 0,
+                    processed_items INTEGER DEFAULT 0,
+                    last_updated TEXT,
+                    is_complete BOOLEAN DEFAULT FALSE,
+                    error_count INTEGER DEFAULT 0
                 )
                 """)
                 
@@ -81,7 +95,8 @@ class DatabaseManager:
                 
                 # Check if book exists and compare data
                 cursor.execute("""
-                SELECT size, media_count, article_count, book_date
+                SELECT size, media_count, article_count, book_date,
+                       title, description, language, creator, publisher, name, tags
                 FROM books WHERE id = ?
                 """, (book_data['id'],))
                 
@@ -90,15 +105,28 @@ class DatabaseManager:
                 
                 if existing:
                     # Compare relevant fields to determine if update needed
-                    old_size, old_media_count, old_article_count, old_date = existing
+                    old_size, old_media_count, old_article_count, old_date, \
+                    old_title, old_desc, old_lang, old_creator, old_pub, old_name, old_tags = existing
                     needs_update = (
                         old_size != book_data.get('size', 0) or
                         old_media_count != book_data.get('media_count', 0) or
                         old_article_count != book_data.get('article_count', 0) or
-                        old_date != book_data.get('book_date', '')
+                        old_date != book_data.get('book_date', '') or
+                        old_title != book_data.get('title', '') or
+                        old_desc != book_data.get('description', '') or
+                        old_lang != book_data.get('language', '') or
+                        old_creator != book_data.get('creator', '') or
+                        old_pub != book_data.get('publisher', '') or
+                        old_name != book_data.get('name', '') or
+                        old_tags != book_data.get('tags', '')
                     )
                 
                 if needs_update:
+                    log.info("database.updating_book",
+                            book_id=book_data['id'],
+                            title=book_data.get('title', ''),
+                            language=book_data.get('language', ''))
+                            
                     cursor.execute("""
                     INSERT OR REPLACE INTO books (
                         id, url, size, media_count, article_count,
@@ -121,7 +149,7 @@ class DatabaseManager:
                         book_data.get('creator', ''),
                         book_data.get('publisher', ''),
                         book_data.get('name', ''),
-                        json.dumps(book_data.get('tags', [])),
+                        book_data.get('tags', ''),
                         book_data.get('book_date', ''),
                         datetime.now().isoformat(),
                         True
@@ -146,9 +174,9 @@ class DatabaseManager:
                 cursor.execute("""
                 INSERT OR REPLACE INTO meta4_info (
                     book_id, mirrors, md5_hash, sha1_hash,
-                    sha256_hash, piece_length, last_meta4_update,
+                    sha256_hash, piece_length, file_size, last_meta4_update,
                     meta4_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     book_id,
                     json.dumps(meta4_data.get('mirrors', [])),
@@ -156,6 +184,7 @@ class DatabaseManager:
                     meta4_data.get('sha1_hash', ''),
                     meta4_data.get('sha256_hash', ''),
                     meta4_data.get('piece_length', 0),
+                    meta4_data.get('file_size', 0),
                     datetime.now().isoformat(),
                     meta4_data.get('meta4_url', '')
                 ))
