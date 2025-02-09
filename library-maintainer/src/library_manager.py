@@ -104,19 +104,25 @@ class LibraryManager:
                     # Get metadata
                     metadata = self._get_zim_metadata(filepath)
                     
-                    # Create book element
+                    # Create book element with all attributes
                     book = ET.SubElement(root, 'book')
-                    book.set('id', f"kiwix_{metadata['name']}")
+                    book.set('id', metadata['id'])
                     book.set('path', rel_path)
+                    book.set('size', str(size))
+                    book.set('mediaCount', str(metadata.get('media_count', 0)))
+                    book.set('articleCount', str(metadata.get('article_count', 0)))
+                    book.set('favicon', metadata.get('favicon', ''))
+                    book.set('faviconMimeType', metadata.get('favicon_mime_type', ''))
                     
                     # Add metadata elements
-                    ET.SubElement(book, 'title').text = metadata['name']
-                    ET.SubElement(book, 'creator').text = metadata['creator']
-                    ET.SubElement(book, 'publisher').text = metadata['publisher']
-                    ET.SubElement(book, 'date').text = metadata['date']
+                    ET.SubElement(book, 'title').text = metadata['title']
                     ET.SubElement(book, 'description').text = metadata['description']
                     ET.SubElement(book, 'language').text = metadata['language']
-                    ET.SubElement(book, 'size').text = str(size)
+                    ET.SubElement(book, 'creator').text = metadata['creator']
+                    ET.SubElement(book, 'publisher').text = metadata['publisher']
+                    ET.SubElement(book, 'name').text = metadata['name']
+                    ET.SubElement(book, 'tags').text = metadata['tags']
+                    ET.SubElement(book, 'date').text = metadata['date']
                     
                     # Add URL for source
                     if os.getenv("TESTING", "false").lower() == "true":
